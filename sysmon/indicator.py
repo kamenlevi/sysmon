@@ -68,8 +68,10 @@ class SysMonIndicator:
             self._indicator.set_status(AppIndicator.IndicatorStatus.ACTIVE)
             # AppIndicator forces a menu on left-click; intercept its open and
             # show the donut panel instead, so one click goes straight to it.
+            # The single item is intentionally label-less so nothing visible
+            # appears before the panel.
             menu = Gtk.Menu()
-            item = Gtk.MenuItem(label="Show / hide stats")
+            item = Gtk.MenuItem()
             item.connect("activate", lambda *_: self._toggle_popup())
             menu.append(item)
             menu.show_all()
