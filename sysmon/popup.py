@@ -6,6 +6,8 @@ position/size persisted in settings. Content scales with the window —
 progress bars expand, labels ellipsise, no scrolling.
 Minimum size: 220 × 200 px.
 """
+import time
+
 import gi
 gi.require_version("Gtk", "3.0")
 from gi.repository import Gtk, Gdk, GLib, Pango
@@ -166,7 +168,7 @@ def _section_row(title: str) -> Gtk.Label:
 class PopupWindow(Gtk.Window):
 
     def __init__(self, on_open_app, settings, on_settings=None, on_quit=None):
-        super().__init__(type=Gtk.WindowType.POPUP)
+        super().__init__(type=Gtk.WindowType.TOPLEVEL)
         self.on_open_app = on_open_app
         self.settings = settings
         self._on_settings = on_settings
@@ -179,43 +181,30 @@ class PopupWindow(Gtk.Window):
 
         _apply_css()
 
-        # Window chrome
+        # Window chrome — behaves like a menu dropdown, not a window
         self.get_style_context().add_class("sysmon-popup")
         self.set_decorated(False)
-        self.set_resizable(True)
+        self.set_resizable(False)
         self.set_skip_taskbar_hint(True)
         self.set_skip_pager_hint(True)
         self.set_keep_above(True)
-        self.set_size_request(MIN_W, MIN_H)
-        self.set_default_size(
-            max(MIN_W, settings.popup_w),
-            max(MIN_H, settings.popup_h),
-        )
+        self.set_type_hint(Gdk.WindowTypeHint.POPUP_MENU)
+        self.set_size_request(MIN_W, -1)
 
-        # Restore saved position (done on first map)
-        self.connect("map", self._on_first_map)
-        self.connect("configure-event", self._on_configure)
-        self.connect("focus-out-event", lambda *_: None)   # don't auto-hide
+        # Auto-hide when the user clicks elsewhere, like a real menu
+        self.connect("focus-out-event", self._on_focus_out)
+        self.connect("key-press-event", self._on_key_press)
 
         # Root layout
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self.add(root)
 
-        root.pack_start(self._build_header(), False, False, 0)
-        root.pack_start(Gtk.Separator(), False, False, 0)
-
-        # Scrollable content area (hides vertical scrollbar; horizontal never)
-        self._content_scroll = Gtk.ScrolledWindow()
-        self._content_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.NEVER)
-        self._content_scroll.set_propagate_natural_height(True)
-        root.pack_start(self._content_scroll, True, True, 0)
-
         self._content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        self._content_box.set_margin_start(10)
-        self._content_box.set_margin_end(10)
-        self._content_box.set_margin_top(4)
-        self._content_box.set_margin_bottom(6)
-        self._content_scroll.add(self._content_box)
+        self._content_box.set_margin_start(12)
+        self._content_box.set_margin_end(12)
+        self._content_box.set_margin_top(10)
+        self._content_box.set_margin_bottom(8)
+        root.pack_start(self._content_box, True, True, 0)
 
         self._build_metrics()
 
@@ -227,10 +216,22 @@ class PopupWindow(Gtk.Window):
 
         root.pack_start(Gtk.Separator(), False, False, 0)
         root.pack_start(self._build_bottom_bar(), False, False, 0)
-        root.pack_start(self._build_grip_row(), False, False, 0)
 
         self.show_all()
         self.hide()
+
+    def _on_focus_out(self, *_):
+        # Ignore the focus flicker caused by the indicator menu closing as the
+        # popup opens; only auto-hide once the popup has settled.
+        if time.monotonic() - getattr(self, "_shown_at", 0) < 0.4:
+            return False
+        self.hide()
+        return False
+
+    def _on_key_press(self, _w, event):
+        if event.keyval == Gdk.KEY_Escape:
+            self.hide()
+        return False
 
     # ── Header ────────────────────────────────────────────────────────────────
 
@@ -298,7 +299,7 @@ class PopupWindow(Gtk.Window):
         self._cpu_sub.set_ellipsize(Pango.EllipsizeMode.END)
 
         self._attach_metric(self._cpu_grid,
-                            icon="🖥", bar=self._cpu_pbar,
+                            icon="", bar=self._cpu_pbar,
                             val=self._cpu_pct, extra=self._cpu_temp)
         self._cpu_grid.attach(self._cpu_sub, 0, 1, 4, 1)
 
@@ -318,7 +319,7 @@ class PopupWindow(Gtk.Window):
         self._gpu_sub.set_ellipsize(Pango.EllipsizeMode.END)
 
         self._attach_metric(self._gpu_grid,
-                            icon="🎮", bar=self._gpu_pbar,
+                            icon="", bar=self._gpu_pbar,
                             val=self._gpu_pct, extra=self._gpu_temp)
         self._gpu_grid.attach(self._gpu_sub, 0, 1, 4, 1)
 
@@ -333,7 +334,7 @@ class PopupWindow(Gtk.Window):
         self._ram_sub.set_ellipsize(Pango.EllipsizeMode.END)
 
         self._attach_metric(self._ram_grid,
-                            icon="🧠", bar=self._ram_pbar, val=self._ram_pct)
+                            icon="", bar=self._ram_pbar, val=self._ram_pct)
         self._ram_grid.attach(self._ram_sub, 0, 1, 4, 1)
 
         # ── Fans ───────────────────────────────────────────────────────────
@@ -365,11 +366,8 @@ class PopupWindow(Gtk.Window):
 
     def _attach_metric(self, grid, icon, bar, val, extra=None):
         """
-        Row 0: [icon lbl (fixed)] [progress bar (hexpand)] [val lbl] [extra lbl]
+        Row 0: [progress bar (hexpand)] [val lbl] [extra lbl]
         """
-        icon_lbl = _lbl(icon, "sub")
-        icon_lbl.set_size_request(16, -1)
-        grid.attach(icon_lbl, 0, 0, 1, 1)
         grid.attach(bar, 1, 0, 1, 1)
         val.set_size_request(50, -1)
         grid.attach(val, 2, 0, 1, 1)
@@ -508,7 +506,7 @@ class PopupWindow(Gtk.Window):
             else:
                 self._cpu_temp.set_text("")
 
-            throttle = " ⚡" if s.thermal_throttling else ""
+            throttle = " (throttling)" if s.thermal_throttling else ""
             freq = f"{s.cpu_freq_mhz:.0f}/{s.cpu_freq_max_mhz:.0f}MHz{throttle}" \
                    if s.cpu_freq_mhz > 0 else ""
             self._cpu_sub.set_text(freq)
@@ -552,9 +550,8 @@ class PopupWindow(Gtk.Window):
         if s.warnings:
             self._warn_sep.set_visible(True)
             self._warn_box.set_visible(True)
-            self._hdr_warn.set_visible(True)
             for w in s.warnings:
-                lbl = Gtk.Label(label=f"⚠  {w}", xalign=0.0)
+                lbl = Gtk.Label(label=f"!  {w}", xalign=0.0)
                 lbl.get_style_context().add_class("warn-text")
                 lbl.set_ellipsize(Pango.EllipsizeMode.END)
                 self._warn_box.pack_start(lbl, False, False, 0)
@@ -562,7 +559,6 @@ class PopupWindow(Gtk.Window):
         else:
             self._warn_sep.set_visible(False)
             self._warn_box.set_visible(False)
-            self._hdr_warn.set_visible(False)
 
     def _update_fan_rpms(self, fans):
         if not fans:
@@ -705,20 +701,24 @@ class PopupWindow(Gtk.Window):
         if self.get_visible():
             self.hide()
             return
+        self._shown_at = time.monotonic()
+        self._position_under_cursor()
         self.show_all()
         self.present()
         self._position_under_cursor()
+        self.grab_focus()
 
     def _position_under_cursor(self):
         display = Gdk.Display.get_default()
         seat = display.get_default_seat()
         pointer = seat.get_pointer()
         _, cursor_x, cursor_y = pointer.get_position()
-        w, h = self.get_size()
+        w, _h = self.get_size()
         screen = Gdk.Screen.get_default()
         screen_w = screen.get_width()
-        x = max(0, min(cursor_x - w // 2, screen_w - w))
-        y = 28
+        # Drop straight down from the icon, kept on-screen horizontally.
+        x = max(4, min(cursor_x - w // 2, screen_w - w - 4))
+        y = 32
         self.move(x, y)
 
 
@@ -730,10 +730,6 @@ class _FanRpmRow(Gtk.Box):
     def __init__(self, label: str, rpm: int):
         super().__init__(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         self._label_str = label
-
-        icon = _lbl("💨", "sub")
-        icon.set_size_request(16, -1)
-        self.pack_start(icon, False, False, 0)
 
         self._name_lbl = _lbl(label, "sub")
         self._name_lbl.set_ellipsize(Pango.EllipsizeMode.END)
