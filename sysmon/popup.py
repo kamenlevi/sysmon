@@ -280,9 +280,19 @@ class PopupWindow(Gtk.Window):
     # ── Auto-hide ──────────────────────────────────────────────────────
 
     def _on_focus_out(self, *_):
-        if time.monotonic() - self._shown_at < 0.4:
+        # Ignore the focus flicker while the indicator menu closes as the
+        # panel opens; only auto-hide once the panel has settled.
+        if time.monotonic() - self._shown_at < 0.6:
             return False
         self.hide()
+        return False
+
+    def _settle(self):
+        # Re-assert focus once the indicator menu has fully closed, so a real
+        # click elsewhere reliably closes the panel.
+        if self.get_visible():
+            self.present()
+            self.grab_focus()
         return False
 
     def _on_key_press(self, _w, event):
@@ -362,9 +372,10 @@ class PopupWindow(Gtk.Window):
             return
         self._shown_at = time.monotonic()
         self.show_all()
-        self.present()
         self._position_under_cursor()
+        self.present()
         self.grab_focus()
+        GLib.timeout_add(300, self._settle)
 
     def _position_under_cursor(self):
         display = Gdk.Display.get_default()

@@ -67,12 +67,15 @@ class SysMonIndicator:
                 AppIndicator.IndicatorCategory.HARDWARE,
             )
             self._indicator.set_status(AppIndicator.IndicatorStatus.ACTIVE)
+            # AppIndicator forces a menu on left-click; we auto-activate its
+            # single item so the click opens the stats panel directly. The
+            # label is a fallback in case auto-activate is suppressed.
             menu = Gtk.Menu()
-            item = Gtk.MenuItem()
+            item = Gtk.MenuItem(label="Show / hide stats")
             item.connect("activate", lambda *_: self._toggle_popup())
             menu.append(item)
             menu.show_all()
-            menu.connect("show", lambda m: GLib.idle_add(item.activate))
+            menu.connect("show", self._on_menu_show)
             self._indicator.set_menu(menu)
         else:
             self._status_icon = Gtk.StatusIcon()
@@ -146,6 +149,15 @@ class SysMonIndicator:
             except Exception:
                 pass
         return True  # keep the timer running
+
+    def _on_menu_show(self, menu):
+        # Left-click opened the (one-item) menu. Close it immediately and open
+        # the stats panel instead, so a single click goes straight to stats.
+        def go():
+            menu.popdown()
+            self._toggle_popup()
+            return False
+        GLib.idle_add(go)
 
     def _toggle_popup(self):
         # Pre-fill with current data so the panel never flashes empty.
