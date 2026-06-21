@@ -43,11 +43,11 @@ window.sysmon-popup {
     min-width: 0;
     min-height: 0;
 }
-.popup-close:hover { color: #f38ba8; }
+.popup-close:hover { color: #cdd6f4; }
 
 /* ---- section titles ---- */
 .sec-title {
-    color: #89b4fa;
+    color: #a6adc8;
     font-size: 9px;
     font-weight: bold;
     letter-spacing: 0.8px;
@@ -55,8 +55,8 @@ window.sysmon-popup {
 
 /* ---- metric values ---- */
 .val       { color: #cdd6f4; font-family: monospace; font-size: 11px; }
-.val-warn  { color: #f38ba8; font-family: monospace; font-size: 11px; }
-.val-ok    { color: #a6e3a1; font-family: monospace; font-size: 11px; }
+.val-warn  { color: #cdd6f4; font-family: monospace; font-size: 11px; }
+.val-ok    { color: #cdd6f4; font-family: monospace; font-size: 11px; }
 .sub       { color: #6c7086; font-size: 9px; }
 
 /* ---- progress bars ---- */
@@ -77,7 +77,7 @@ progressbar.bar-warn progress { background-color: #7a8394; }
 progressbar.bar-crit progress { background-color: #7a8394; }
 
 /* ---- warning list ---- */
-.warn-text { color: #fab387; font-size: 10px; }
+.warn-text { color: #a6adc8; font-size: 10px; }
 
 /* ---- bottom buttons ---- */
 .btn-action {
@@ -91,7 +91,7 @@ progressbar.bar-crit progress { background-color: #7a8394; }
 .btn-action:hover { background-color: #45475a; }
 .btn-curve {
     background-color: #1e1e2e;
-    color: #89b4fa;
+    color: #cdd6f4;
     border: 1px solid #45475a;
     border-radius: 5px;
     padding: 3px 10px;
@@ -166,7 +166,7 @@ def _section_row(title: str) -> Gtk.Label:
 class PopupWindow(Gtk.Window):
 
     def __init__(self, on_open_app, settings, on_settings=None, on_quit=None):
-        super().__init__(type=Gtk.WindowType.TOPLEVEL)
+        super().__init__(type=Gtk.WindowType.POPUP)
         self.on_open_app = on_open_app
         self.settings = settings
         self._on_settings = on_settings
@@ -701,14 +701,25 @@ class PopupWindow(Gtk.Window):
     # ── Show ──────────────────────────────────────────────────────────────────
 
     def show_near_top_right(self):
-        """Toggle: show at saved/default position, or hide if already visible."""
+        """Toggle: show right under the panel icon, or hide if already visible."""
         if self.get_visible():
             self.hide()
             return
         self.show_all()
         self.present()
-        # Position is handled by _on_first_map on first show;
-        # subsequent shows restore last position via configure-event saved values.
+        self._position_under_cursor()
+
+    def _position_under_cursor(self):
+        display = Gdk.Display.get_default()
+        seat = display.get_default_seat()
+        pointer = seat.get_pointer()
+        _, cursor_x, cursor_y = pointer.get_position()
+        w, h = self.get_size()
+        screen = Gdk.Screen.get_default()
+        screen_w = screen.get_width()
+        x = max(0, min(cursor_x - w // 2, screen_w - w))
+        y = 28
+        self.move(x, y)
 
 
 # ── Fan RPM row widget ────────────────────────────────────────────────────────
