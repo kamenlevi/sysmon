@@ -11,10 +11,6 @@ _LAST_KEY = [None]
 _LAST_PATH = [None]
 
 
-def _bar_color(pct: float):
-    return (0.85, 0.88, 0.95)
-
-
 def generate_tray_icon(
     cpu_pct: float,
     ram_pct: float,
@@ -24,8 +20,6 @@ def generate_tray_icon(
     size: int = 22,
 ) -> str:
     """Draw bars for cpu/gpu/ram. Returns path to written PNG."""
-    # Skip rendering when the visible state (rounded percentages + flags) is
-    # unchanged — this happens most ticks at idle and avoids a PNG write.
     key = (
         int(round(cpu_pct)),
         int(round(ram_pct)),
@@ -39,11 +33,10 @@ def generate_tray_icon(
     surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, size, size)
     ctx = cairo.Context(surface)
 
-    # Transparent background
     ctx.set_source_rgba(0, 0, 0, 0)
     ctx.paint()
 
-    bars = [("cpu", cpu_pct), ("gpu", gpu_pct if has_gpu else None), ("ram", ram_pct)]
+    bars = [cpu_pct, gpu_pct if has_gpu else None, ram_pct]
 
     n = len(bars)
     pad = 1
@@ -51,47 +44,24 @@ def generate_tray_icon(
     total_gap = gap * (n - 1) + pad * 2
     bar_w = max(2, (size - total_gap) // n)
 
-    for i, (_, pct) in enumerate(bars):
+    for i, pct in enumerate(bars):
         x = pad + i * (bar_w + gap)
         y_bg_top = pad
         bg_h = size - pad * 2
 
-        # Dark background track (always drawn for constant width)
-        ctx.set_source_rgba(0.15, 0.15, 0.15, 0.85)
+        ctx.set_source_rgba(0.35, 0.35, 0.35, 0.6)
         _rounded_rect(ctx, x, y_bg_top, bar_w, bg_h, 1)
         ctx.fill()
 
         if pct is None:
             continue
 
-        # Filled portion (from bottom)
         bar_h = max(1, int(pct / 100.0 * bg_h))
-        r, g, b = _bar_color(pct)
-        ctx.set_source_rgba(r, g, b, 0.95)
+        ctx.set_source_rgba(0.85, 0.85, 0.85, 0.9)
         y_fill = pad + bg_h - bar_h
         _rounded_rect(ctx, x, y_fill, bar_w, bar_h, 1)
         ctx.fill()
 
-    # Warning triangle overlay (top-right corner)
-    if has_warning:
-        tw = 8
-        tx = size - tw - 0
-        ty = 0
-        ctx.set_source_rgba(1.0, 0.85, 0.0, 1.0)
-        ctx.move_to(tx + tw / 2, ty)
-        ctx.line_to(tx + tw, ty + tw)
-        ctx.line_to(tx, ty + tw)
-        ctx.close_path()
-        ctx.fill()
-        ctx.set_source_rgba(0.1, 0.1, 0.1, 1.0)
-        ctx.set_line_width(1)
-        ctx.move_to(tx + tw / 2, ty + 2.5)
-        ctx.line_to(tx + tw / 2, ty + tw - 2.5)
-        ctx.stroke()
-        ctx.arc(tx + tw / 2, ty + tw - 1.5, 0.8, 0, 6.28)
-        ctx.fill()
-
-    # Alternate filenames so AppIndicator is forced to refresh
     _COUNTER[0] = (_COUNTER[0] + 1) % 2
     path = os.path.join(_ICON_DIR, f"sysmon_icon_{_COUNTER[0]}.png")
     surface.write_to_png(path)

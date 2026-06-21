@@ -65,12 +65,11 @@ class SysMonIndicator:
                 AppIndicator.IndicatorCategory.HARDWARE,
             )
             self._indicator.set_status(AppIndicator.IndicatorStatus.ACTIVE)
-            menu = self._build_passthrough_menu()
+            menu = Gtk.Menu()
+            menu.append(Gtk.MenuItem())
+            menu.show_all()
+            menu.connect("show", self._on_menu_show)
             self._indicator.set_menu(menu)
-            try:
-                self._indicator.set_secondary_activate_target(menu.get_children()[0])
-            except Exception:
-                pass
         else:
             self._status_icon = Gtk.StatusIcon()
             self._status_icon.set_from_icon_name("utilities-system-monitor")
@@ -79,14 +78,9 @@ class SysMonIndicator:
         monitor.add_callback(self._on_stats)
         GLib.timeout_add(1500, self._update_icon)
 
-    def _build_passthrough_menu(self) -> Gtk.Menu:
-        """Minimal menu that just toggles the popup on any interaction."""
-        menu = Gtk.Menu()
-        item = Gtk.MenuItem(label="Toggle Stats")
-        item.connect("activate", lambda *_: self._toggle_popup())
-        menu.append(item)
-        menu.show_all()
-        return menu
+    def _on_menu_show(self, menu):
+        menu.popdown()
+        GLib.idle_add(self._toggle_popup)
 
     def _on_stats(self, s: SystemStats):
         self._last_stats = s
