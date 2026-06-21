@@ -13,8 +13,9 @@ _ICON_DIR = os.path.join(tempfile.gettempdir(), "sysmon_icons")
 os.makedirs(_ICON_DIR, exist_ok=True)
 _COUNTER = [0]
 
-# Fixed icon geometry — never changes.
-WIDTH = 46
+# Fixed icon geometry — never changes. Square, because the Ubuntu
+# AppIndicator only reliably renders square icons.
+WIDTH = 22
 HEIGHT = 22
 
 
@@ -32,8 +33,8 @@ def generate_tray_icon(cpu_history=None, ram_pct=0.0, **_kwargs) -> str:
     ctx.paint()
 
     pad = 2
-    bar_w = 4
-    gap = 3
+    bar_w = 3
+    gap = 2
     graph_x0 = pad
     graph_x1 = WIDTH - pad - bar_w - gap
     graph_w = graph_x1 - graph_x0
