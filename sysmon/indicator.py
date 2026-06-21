@@ -66,12 +66,11 @@ class SysMonIndicator:
                 AppIndicator.IndicatorCategory.HARDWARE,
             )
             self._indicator.set_status(AppIndicator.IndicatorStatus.ACTIVE)
-            # AppIndicator forces a menu on left-click; intercept its open and
-            # show the donut panel instead, so one click goes straight to it.
-            # The single item is intentionally label-less so nothing visible
-            # appears before the panel.
+            # AppIndicator forces a menu on left-click. Keep one real item so
+            # the menu is valid/clickable, but pop it down the instant it opens
+            # and show the donut panel instead — so nothing visible is clicked.
             menu = Gtk.Menu()
-            item = Gtk.MenuItem()
+            item = Gtk.MenuItem(label="Stats")
             item.connect("activate", lambda *_: self._toggle_popup())
             menu.append(item)
             menu.show_all()
@@ -90,12 +89,10 @@ class SysMonIndicator:
     # ── Click → donut panel ──────────────────────────────────────────────────
 
     def _on_menu_show(self, menu):
-        # Close the (one-item) indicator menu and open the donut panel instead.
-        def go():
-            menu.popdown()
-            self._toggle_popup()
-            return False
-        GLib.idle_add(go)
+        # Suppress the menu the moment it opens, then show the donut panel —
+        # popdown synchronously so the item never visibly renders.
+        menu.popdown()
+        GLib.idle_add(self._toggle_popup)
 
     def _toggle_popup(self):
         if not self._popup.get_visible():
