@@ -9,7 +9,6 @@ from gi.repository import Gtk, GLib, Notify
 
 from .icon_gen import generate_tray_icon
 from .monitor import SystemStats
-from .popup import PopupWindow
 from .settings import open_settings_dialog
 
 try:
@@ -50,14 +49,6 @@ class SysMonIndicator:
         )
         self._fan_controller.start()
 
-        self._popup = PopupWindow(
-            on_open_app=self._show_main_window,
-            settings=settings,
-            on_settings=lambda: self._on_settings(),
-            on_quit=Gtk.main_quit,
-        )
-        self._popup._fan_controller = self._fan_controller
-
         if _HAS_INDICATOR:
             self._indicator = AppIndicator.Indicator.new(
                 "sysmon",
@@ -65,25 +56,100 @@ class SysMonIndicator:
                 AppIndicator.IndicatorCategory.HARDWARE,
             )
             self._indicator.set_status(AppIndicator.IndicatorStatus.ACTIVE)
-            # AppIndicator forces a menu on left-click; we auto-activate its
-            # single item so the click opens the stats panel directly. The
-            # label is a fallback in case auto-activate is suppressed.
-            menu = Gtk.Menu()
-            item = Gtk.MenuItem(label="Show / hide stats")
-            item.connect("activate", lambda *_: self._toggle_popup())
-            menu.append(item)
-            menu.show_all()
-            menu.connect("show", self._on_menu_show)
-            self._indicator.set_menu(menu)
+            # On GNOME the menu is rendered by the shell over DBus, so a single
+            # left-click opens it directly — we put the live stats right in it.
+            self._indicator.set_menu(self._build_menu())
         else:
             self._status_icon = Gtk.StatusIcon()
             self._status_icon.set_from_icon_name("utilities-system-monitor")
-            self._status_icon.connect("activate", self._on_tray_click)
+            self._status_icon.connect("activate", lambda *_: None)
 
         monitor.add_callback(self._on_stats)
         self._set_static_icon()
+        self._refresh_menu(self._last_stats, [])
         self._update_label()
         GLib.timeout_add(1500, self._update_label)
+
+    # ── Stats menu ─────────────────────────────────────────────────────────
+
+    def _build_menu(self) -> Gtk.Menu:
+        menu = Gtk.Menu()
+
+        def info_item():
+            it = Gtk.MenuItem()
+            it.set_sensitive(False)        # info row, not clickable
+            menu.append(it)
+            return it
+
+        self._mi_cpu = info_item()
+        self._mi_gpu = info_item()
+        self._mi_gpu.set_no_show_all(True)
+        self._mi_ram = info_item()
+
+        menu.append(Gtk.SeparatorMenuItem())
+
+        self._mi_proc_header = info_item()
+        self._mi_proc_header.set_label("Top processes")
+        self._mi_procs = []
+        for _ in range(5):
+            it = info_item()
+            it.set_no_show_all(True)
+            self._mi_procs.append(it)
+
+        menu.append(Gtk.SeparatorMenuItem())
+
+        settings_item = Gtk.MenuItem(label="Settings…")
+        settings_item.connect("activate", self._on_settings)
+        menu.append(settings_item)
+
+        quit_item = Gtk.MenuItem(label="Quit")
+        quit_item.connect("activate", lambda *_: Gtk.main_quit())
+        menu.append(quit_item)
+
+        menu.show_all()
+        return menu
+
+    def _refresh_menu(self, s: SystemStats, procs):
+        if not _HAS_INDICATOR:
+            return
+
+        # CPU
+        cpu = f"CPU   {s.cpu_percent:.0f}%"
+        extra = []
+        if s.cpu_freq_mhz > 0:
+            extra.append(f"{s.cpu_freq_mhz/1000:.1f} GHz")
+        if self.settings.show_temp and s.cpu_temp > 0:
+            extra.append(f"{s.cpu_temp:.0f}°C")
+        if extra:
+            cpu += "    " + "  ".join(extra)
+        self._mi_cpu.set_label(cpu)
+
+        # GPU
+        if self.settings.show_gpu and s.gpu_available:
+            self._mi_gpu.set_visible(True)
+            gpu = f"GPU   {s.gpu_percent:.0f}%"
+            if self.settings.show_temp and s.gpu_temp > 0:
+                gpu += f"    {s.gpu_temp:.0f}°C"
+            self._mi_gpu.set_label(gpu)
+        else:
+            self._mi_gpu.set_visible(False)
+
+        # Memory
+        self._mi_ram.set_label(
+            f"Memory   {s.ram_percent:.0f}%    "
+            f"{s.ram_used_gb:.1f} / {s.ram_total_gb:.1f} GB"
+        )
+
+        # Top processes
+        procs = procs or []
+        self._mi_proc_header.set_visible(bool(procs))
+        for i, it in enumerate(self._mi_procs):
+            if i < len(procs):
+                p = procs[i]
+                it.set_visible(True)
+                it.set_label(f"   {p.name}    {p.cpu_percent:.0f}%")
+            else:
+                it.set_visible(False)
 
     def _on_stats(self, s: SystemStats):
         self._last_stats = s
@@ -94,15 +160,13 @@ class SysMonIndicator:
                 (label, rpm, ctrl_by_label.get(label, False))
                 for label, rpm, _ in s.fans
             ]
-        # Don't bother updating the popup when it's hidden — saves a marshalled
-        # idle callback plus a full GTK widget tree update every tick.
-        if self._popup.get_visible():
-            try:
-                from .processes import collect_top_processes
-                procs = collect_top_processes(5, sort_by="cpu")
-            except Exception:
-                procs = []
-            GLib.idle_add(self._popup.update, s, procs)
+        # Refresh the stats menu so it is current whenever the user opens it.
+        try:
+            from .processes import collect_top_processes
+            procs = collect_top_processes(5, sort_by="cpu")
+        except Exception:
+            procs = []
+        GLib.idle_add(self._refresh_menu, s, procs)
         self._maybe_notify(s)
 
     def _maybe_notify(self, s: SystemStats):
@@ -153,29 +217,6 @@ class SysMonIndicator:
         guide = "  ".join("CPU 100%" for _ in parts)
         self._indicator.set_label(label, guide)
         return True  # keep the timer running
-
-    def _on_menu_show(self, menu):
-        # Left-click opened the (one-item) menu. Close it immediately and open
-        # the stats panel instead, so a single click goes straight to stats.
-        def go():
-            menu.popdown()
-            self._toggle_popup()
-            return False
-        GLib.idle_add(go)
-
-    def _toggle_popup(self):
-        # Pre-fill with current data so the panel never flashes empty.
-        if not self._popup.get_visible():
-            try:
-                from .processes import collect_top_processes
-                procs = collect_top_processes(5, sort_by="cpu")
-            except Exception:
-                procs = []
-            self._popup.update(self._last_stats, procs)
-        self._popup.show_near_top_right()   # handles toggle internally
-
-    def _on_tray_click(self, *_):
-        self._toggle_popup()
 
     def _show_main_window(self):
         if self._main_window is None:
