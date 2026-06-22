@@ -107,14 +107,10 @@ class CoresView(Gtk.Box):
         self._hist = []
         self._last_s = None
 
-        ctrl = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        ctrl.pack_start(Gtk.Label(label="History:"), False, False, 0)
-        self._combo = Gtk.ComboBoxText()
-        for label, secs in _WINDOWS:
-            self._combo.append("none" if secs is None else str(secs), label)
-        self._combo.set_active(1)
-        self._combo.connect("changed", lambda *_: self._redraw())
-        ctrl.pack_start(self._combo, False, False, 0)
+        from .detail_views import _segmented
+        ctrl = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
+        ctrl.pack_start(Gtk.Label(label="History: "), False, False, 0)
+        self._win_btns = _segmented(ctrl, _WINDOWS, 300, lambda _v: self._redraw())
         self._span_lbl = Gtk.Label(xalign=1.0)
         self._span_lbl.set_markup("<small>—</small>")
         ctrl.pack_end(self._span_lbl, True, True, 0)
@@ -158,8 +154,10 @@ class CoresView(Gtk.Box):
         self._cpu_grid.show_all()
 
     def _window(self):
-        wid = self._combo.get_active_id()
-        return None if wid == "none" else int(wid)
+        for b in self._win_btns:
+            if b.get_active():
+                return b._value
+        return 300
 
     def update(self, s: SystemStats, hist=None):
         self._hist = hist or []

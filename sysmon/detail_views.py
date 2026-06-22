@@ -19,6 +19,30 @@ from .processes import collect_top_processes, terminate_group
 
 _WINDOWS = [("5 min", 300), ("30 min", 1800), ("1 hour", 3600),
             ("6 hours", 21600), ("24 hours", 86400)]
+
+
+def _segmented(box, options, active_value, on_select):
+    """A row of grouped toggle buttons (no popup → safe on the panel).
+
+    options: list of (label, value). Returns the list of buttons; each has a
+    `_value` attr. on_select(value) is called when the selection changes.
+    """
+    btns = []
+    group = None
+    for label, value in options:
+        rb = Gtk.RadioButton.new_with_label_from_widget(group, label)
+        if group is None:
+            group = rb
+        rb.set_mode(False)            # render as a button, not a radio dot
+        rb._value = value
+        rb.connect("toggled", lambda b: b.get_active() and on_select(b._value))
+        box.pack_start(rb, False, False, 0)
+        btns.append(rb)
+    for rb in btns:
+        if rb._value == active_value:
+            rb.set_active(True)
+            break
+    return btns
 _SERIES = [("CPU", (0.23, 0.43, 0.65)),
            ("RAM", (0.62, 0.40, 0.66)),
            ("GPU", (0.30, 0.60, 0.38))]
@@ -173,18 +197,10 @@ class HistoryView(Gtk.Box):
         self.history = history_db
         self.settings = settings
 
-        ctrl = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        ctrl.pack_start(Gtk.Label(label="Window:"), False, False, 0)
-        self._combo = Gtk.ComboBoxText()
+        ctrl = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
         default = getattr(settings, "history_default_window", 1800)
-        active = 1
-        for i, (label, secs) in enumerate(_WINDOWS):
-            self._combo.append(str(secs), label)
-            if secs == default:
-                active = i
-        self._combo.set_active(active)
-        self._combo.connect("changed", lambda *_: self.refresh())
-        ctrl.pack_start(self._combo, False, False, 0)
+        self._win_btns = _segmented(
+            ctrl, [(l, s) for (l, s) in _WINDOWS], default, self._on_win)
         setd = Gtk.Button(label="Set default")
         setd.connect("clicked", self._set_default)
         ctrl.pack_end(setd, False, False, 0)
@@ -221,20 +237,31 @@ class HistoryView(Gtk.Box):
             return False
         return draw
 
+    def _on_win(self, _secs):
+        self.refresh()
+
+    def _active_idx(self):
+        for i, b in enumerate(self._win_btns):
+            if b.get_active():
+                return i
+        return 0
+
+    def _win_secs(self):
+        return self._win_btns[self._active_idx()]._value
+
     def _zoom(self, direction):
-        i = max(0, min(len(_WINDOWS) - 1, self._combo.get_active() + direction))
-        if i != self._combo.get_active():
-            self._combo.set_active(i)
+        i = max(0, min(len(self._win_btns) - 1, self._active_idx() + direction))
+        self._win_btns[i].set_active(True)
 
     def _set_default(self, *_):
-        self.settings.history_default_window = int(self._combo.get_active_id())
+        self.settings.history_default_window = int(self._win_secs())
         try:
             self.settings.save()
         except Exception:
             pass
 
     def refresh(self):
-        secs = int(self._combo.get_active_id() or 1800)
+        secs = int(self._win_secs() or 1800)
         try:
             raw = self.history.fetch(secs)
         except Exception:
@@ -257,14 +284,9 @@ class ProcessesView(Gtk.Box):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self._sort = "cpu"
 
-        bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        bar.pack_start(Gtk.Label(label="Sort:"), False, False, 0)
-        self._sort_combo = Gtk.ComboBoxText()
-        self._sort_combo.append("cpu", "CPU")
-        self._sort_combo.append("ram", "Memory")
-        self._sort_combo.set_active(0)
-        self._sort_combo.connect("changed", self._on_sort)
-        bar.pack_start(self._sort_combo, False, False, 0)
+        bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
+        bar.pack_start(Gtk.Label(label="Sort: "), False, False, 0)
+        _segmented(bar, [("CPU", "cpu"), ("Memory", "ram")], "cpu", self._on_sort)
         self.pack_start(bar, False, False, 4)
 
         scroll = Gtk.ScrolledWindow()
@@ -299,8 +321,8 @@ class ProcessesView(Gtk.Box):
             row.hide()
             self._rows.append((row, name, cpu, ram))
 
-    def _on_sort(self, *_):
-        self._sort = self._sort_combo.get_active_id()
+    def _on_sort(self, value):
+        self._sort = value
         self.refresh()
 
     def refresh(self):
