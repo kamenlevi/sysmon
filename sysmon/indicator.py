@@ -60,27 +60,28 @@ class SysMonIndicator:
         )
         self._fan_controller.start()
 
-        # Detailed showcase panel + drill-in windows.
+        # Detailed panel + drill-in panels — all share the caret-panel style
+        # and the same on-screen position.
+        self._panel_geom = None
         self._popup = PopupWindow(
             on_open_app=self._show_main_window,
             settings=settings,
             on_settings=lambda: self._on_settings(),
             on_quit=Gtk.main_quit,
-            on_cores=self._open_cores,
-            on_set_default=lambda *_: None,
+            on_cores=lambda: self._open_view("cores", fresh=False),
+            on_nav=lambda v: self._open_view(v, fresh=False),
         )
         self._popup._fan_controller = self._fan_controller
-        self._popup.on_nav = self._open_view   # panel rows can drill in
 
-        from .cores_window import CoresWindow
-        from .detail_views import HistoryView, ProcessesView, DisksView
-        self._cores = CoresWindow()
-        self._history_view = HistoryView(history, settings)
-        self._proc_view = ProcessesView()
-        self._disks_view = DisksView()
-        # Back arrow on any detail view returns to the detailed panel.
-        for v in (self._history_view, self._proc_view, self._disks_view):
-            v.on_back = self._open_panel
+        from .cores_window import CoresPanel
+        from .detail_views import HistoryPanel, ProcessesPanel, DisksPanel
+        self._cores = CoresPanel()
+        self._history = HistoryPanel(history, settings)
+        self._proc = ProcessesPanel()
+        self._disks = DisksPanel()
+        # The back arrow on any drill-in returns to the detailed panel.
+        for p in (self._cores, self._history, self._proc, self._disks):
+            p.on_back = lambda: self._open_view("panel", fresh=False)
 
         if _HAS_INDICATOR:
             self._indicator = AppIndicator.Indicator.new(
@@ -200,7 +201,7 @@ class SysMonIndicator:
             return
         cfg = self.settings
         self._set_gauge(self._mi_cpu, "cpu", s.cpu_percent,
-                        f"CPU   {s.cpu_percent:.0f}%")
+                        f"CPU   {s.cpu_percent:3.0f}%")
         cpu_lines = []
         if s.cpu_freq_mhz > 0:
             cpu_lines.append(f"Frequency:  {s.cpu_freq_mhz/1000:.2f} / "
@@ -214,7 +215,7 @@ class SysMonIndicator:
         if cfg.show_gpu and s.gpu_available:
             self._mi_gpu.set_visible(True)
             self._set_gauge(self._mi_gpu, "gpu", s.gpu_percent,
-                            f"GPU   {s.gpu_percent:.0f}%")
+                            f"GPU   {s.gpu_percent:3.0f}%")
             gpu_lines = []
             if s.gpu_name:
                 gpu_lines.append(s.gpu_name)
@@ -230,7 +231,7 @@ class SysMonIndicator:
             self._mi_gpu.set_visible(False)
 
         self._set_gauge(self._mi_ram, "ram", s.ram_percent,
-                        f"Memory   {s.ram_percent:.0f}%")
+                        f"Memory   {s.ram_percent:3.0f}%")
         ram_lines = [f"Used:  {s.ram_used_gb:.1f} / {s.ram_total_gb:.1f} GB"]
         if s.swap_total_gb > 0:
             ram_lines.append(f"Swap:  {s.swap_used_gb:.1f} / {s.swap_total_gb:.1f} GB")
@@ -241,7 +242,7 @@ class SysMonIndicator:
         except Exception:
             disk_pct = 0.0
         self._set_gauge(self._mi_disk, "disk", disk_pct,
-                        f"Disk   {disk_pct:.0f}%")
+                        f"Disk   {disk_pct:3.0f}%")
         self._fill_items(self._disk_items, self._disk_lines())
 
         down, up = self._net_rate
@@ -249,29 +250,36 @@ class SysMonIndicator:
 
     # ── View opening ─────────────────────────────────────────────────────────
 
-    def _open_view(self, view):
-        if view == "panel":
-            self._open_panel()
-        elif view == "cores":
-            self._open_cores()
-        elif view == "history":
-            self._history_view.refresh()
-            self._history_view.present_window()
-        elif view == "processes":
-            self._proc_view.refresh()
-            self._proc_view.present_window()
-        elif view == "disks":
-            self._disks_view.refresh()
-            self._disks_view.present_window()
+    def _panels(self):
+        return (self._popup, self._cores, self._history, self._proc, self._disks)
 
-    def _open_panel(self):
-        if not self._popup.get_visible():
-            self._popup.update(self._last_stats, self._collect_procs(6))
-        self._popup.show_near_top_right()
+    def _open_view(self, view, fresh=True):
+        from .panel_base import CaretPanel
+        # Fresh opens (from the menu) appear under the cursor; navigation
+        # (panel rows / back arrow) reuses that spot so panels stay put.
+        if fresh or self._panel_geom is None:
+            self._panel_geom = CaretPanel.cursor_geometry()
 
-    def _open_cores(self):
-        self._cores.update(self._last_stats)
-        self._cores.present_window()
+        target = {"panel": self._popup, "cores": self._cores,
+                  "history": self._history, "processes": self._proc,
+                  "disks": self._disks}.get(view)
+        if target is None:
+            return
+
+        if target is self._popup:
+            target.update(self._last_stats, self._collect_procs(6))
+        elif target is self._cores:
+            target.update(self._last_stats)
+        else:
+            target.refresh()
+
+        for p in self._panels():
+            if p is not target:
+                p.hide()
+        target.show_at(*self._panel_geom)
+
+    def _open_panel(self, fresh=True):
+        self._open_view("panel", fresh=fresh)
 
     def _collect_procs(self, n):
         try:
@@ -317,12 +325,12 @@ class SysMonIndicator:
             GLib.idle_add(self._popup.update, s, procs)
         if self._cores.get_visible():
             GLib.idle_add(self._cores.update, s)
-        if self._proc_view.get_visible():
-            GLib.idle_add(self._proc_view.refresh)
-        if self._disks_view.get_visible():
-            GLib.idle_add(self._disks_view.refresh)
-        if self._history_view.get_visible():
-            GLib.idle_add(self._history_view.refresh)
+        if self._proc.get_visible():
+            GLib.idle_add(self._proc.refresh)
+        if self._disks.get_visible():
+            GLib.idle_add(self._disks.refresh)
+        if self._history.get_visible():
+            GLib.idle_add(self._history.refresh)
         self._maybe_notify(s)
 
     def _maybe_notify(self, s: SystemStats):
@@ -390,11 +398,14 @@ class SysMonIndicator:
 
 
 def _rate(bps: float) -> str:
-    for unit in ("B/s", "KB/s", "MB/s", "GB/s"):
-        if bps < 1024:
-            return f"{bps:.0f} {unit}"
-        bps /= 1024
-    return f"{bps:.0f} TB/s"
+    # Fixed-width ("  16 KB/s") so the menu never changes width.
+    val, unit = bps, "B/s "
+    for u in ("KB/s", "MB/s", "GB/s"):
+        if val < 1024:
+            break
+        val /= 1024
+        unit = u
+    return f"{val:4.0f} {unit}"
 
 
 class _DummyApp(Gtk.Application):

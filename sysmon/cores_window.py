@@ -12,6 +12,7 @@ from gi.repository import Gtk
 import cairo
 
 from .monitor import SystemStats
+from .panel_base import CaretPanel
 
 _COLS = 2          # cores laid out in this many columns
 _HIST = 90         # samples kept per graph
@@ -92,29 +93,24 @@ class _GraphCell(Gtk.Box):
         self.label.set_markup(f"<small><b>{text}</b></small>")
 
 
-class CoresWindow(Gtk.Window):
+class CoresPanel(CaretPanel):
     def __init__(self):
-        super().__init__(title="SysMon — Cores")
-        self.set_default_size(500, 420)
-        self.connect("delete-event", self._on_close)
-
-        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
-        root.set_margin_start(14)
-        root.set_margin_end(14)
-        root.set_margin_top(12)
-        root.set_margin_bottom(12)
-        self.add(root)
+        super().__init__("CPU / GPU cores", show_back=True)
+        self.autohide = False
+        root = self.body
 
         self._cpu_header = Gtk.Label(xalign=0)
         self._cpu_header.set_markup("<b>CPU cores</b>")
-        root.pack_start(self._cpu_header, False, False, 0)
+        root.pack_start(self._cpu_header, False, False, 2)
 
         scroll = Gtk.ScrolledWindow()
         scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroll.set_min_content_height(320)
+        scroll.set_max_content_height(380)
         root.pack_start(scroll, True, True, 0)
 
         self._cpu_grid = Gtk.Grid()
-        self._cpu_grid.set_column_spacing(14)
+        self._cpu_grid.set_column_spacing(12)
         self._cpu_grid.set_row_spacing(8)
         self._cpu_grid.set_column_homogeneous(True)
         scroll.add(self._cpu_grid)
@@ -161,10 +157,3 @@ class CoresWindow(Gtk.Window):
         else:
             self._gpu_box.set_visible(False)
 
-    def present_window(self):
-        self.show_all()
-        self.present()
-
-    def _on_close(self, *_):
-        self.hide()
-        return True
