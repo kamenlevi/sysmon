@@ -392,8 +392,10 @@ class PopupWindow(CaretPanel):
         self._refresh_page(name)
 
     def open_to(self, name):
-        """Open straight to a page (from the menu) — back will just close."""
-        self._nav_stack = []
+        """Open straight to a page from the menu. Back goes up to the overview
+        (detailed) panel rather than closing — the simple menu itself can't be
+        reopened programmatically, so the overview is the parent we can show."""
+        self._nav_stack = [] if name == "overview" else ["overview"]
         self.show_page(name)
 
     def _navigate(self, name):
