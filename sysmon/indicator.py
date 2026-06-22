@@ -201,7 +201,7 @@ class SysMonIndicator:
             return
         cfg = self.settings
         self._set_gauge(self._mi_cpu, "cpu", s.cpu_percent,
-                        f"CPU   {s.cpu_percent:3.0f}%")
+                        f"CPU   {_pct3(s.cpu_percent)}%")
         cpu_lines = []
         if s.cpu_freq_mhz > 0:
             cpu_lines.append(f"Frequency:  {s.cpu_freq_mhz/1000:.2f} / "
@@ -215,7 +215,7 @@ class SysMonIndicator:
         if cfg.show_gpu and s.gpu_available:
             self._mi_gpu.set_visible(True)
             self._set_gauge(self._mi_gpu, "gpu", s.gpu_percent,
-                            f"GPU   {s.gpu_percent:3.0f}%")
+                            f"GPU   {_pct3(s.gpu_percent)}%")
             gpu_lines = []
             if s.gpu_name:
                 gpu_lines.append(s.gpu_name)
@@ -231,7 +231,7 @@ class SysMonIndicator:
             self._mi_gpu.set_visible(False)
 
         self._set_gauge(self._mi_ram, "ram", s.ram_percent,
-                        f"Memory   {s.ram_percent:3.0f}%")
+                        f"Memory   {_pct3(s.ram_percent)}%")
         ram_lines = [f"Used:  {s.ram_used_gb:.1f} / {s.ram_total_gb:.1f} GB"]
         if s.swap_total_gb > 0:
             ram_lines.append(f"Swap:  {s.swap_used_gb:.1f} / {s.swap_total_gb:.1f} GB")
@@ -242,7 +242,7 @@ class SysMonIndicator:
         except Exception:
             disk_pct = 0.0
         self._set_gauge(self._mi_disk, "disk", disk_pct,
-                        f"Disk   {disk_pct:3.0f}%")
+                        f"Disk   {_pct3(disk_pct)}%")
         self._fill_items(self._disk_items, self._disk_lines())
 
         down, up = self._net_rate
@@ -372,12 +372,12 @@ class SysMonIndicator:
         if not _HAS_INDICATOR:
             return True
         s = self._last_stats
-        parts = [f"CPU {s.cpu_percent:3.0f}%"]
+        parts = [f"CPU {_pct3(s.cpu_percent)}%"]
         if self.settings.show_gpu and s.gpu_available:
-            parts.append(f"GPU {s.gpu_percent:3.0f}%")
-        parts.append(f"RAM {s.ram_percent:3.0f}%")
+            parts.append(f"GPU {_pct3(s.gpu_percent)}%")
+        parts.append(f"RAM {_pct3(s.ram_percent)}%")
         label = "  ".join(parts)
-        self._indicator.set_label(label, "  ".join("CPU 100%" for _ in parts))
+        self._indicator.set_label(label, label)
         return True
 
     # ── Other windows ────────────────────────────────────────────────────────
@@ -397,15 +397,23 @@ class SysMonIndicator:
         open_settings_dialog(self.settings, parent=self._main_window)
 
 
+_FIG = "\u2007"   # figure space - same width as a digit
+
+
+def _pct3(v) -> str:
+    """A percentage padded to 3 digit-widths so it never shifts."""
+    return f"{int(round(max(0.0, min(v, 100.0))))}".rjust(3, _FIG)
+
+
 def _rate(bps: float) -> str:
-    # Fixed-width ("  16 KB/s") so the menu never changes width.
+    # Fixed digit-width so the menu never changes width.
     val, unit = bps, "B/s "
     for u in ("KB/s", "MB/s", "GB/s"):
         if val < 1024:
             break
         val /= 1024
         unit = u
-    return f"{val:4.0f} {unit}"
+    return f"{int(round(val))}".rjust(4, _FIG) + f" {unit}"
 
 
 class _DummyApp(Gtk.Application):

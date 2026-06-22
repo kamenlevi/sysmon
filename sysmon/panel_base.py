@@ -26,8 +26,8 @@ window.sysmon-panel { background-color: transparent; }
     font-size: 15px; padding: 0 6px; min-width: 0; min-height: 0;
 }
 .close-btn:hover { color: #b04a3a; }
-.back-btn { color: #2a2a2a; font-size: 18px; }
-.back-btn:hover { color: #000000; }
+.back-btn { color: #2a2a2a; font-size: 18px; min-width: 30px; min-height: 26px; padding: 0 8px; }
+.back-btn:hover { color: #000000; background-color: #ececec; border-radius: 6px; }
 """
 
 _CSS_APPLIED = [False]
@@ -65,7 +65,10 @@ class CaretPanel(Gtk.Window):
         self.set_skip_taskbar_hint(True)
         self.set_skip_pager_hint(True)
         self.set_keep_above(True)
-        self.set_type_hint(Gdk.WindowTypeHint.POPUP_MENU)
+        # UTILITY (not POPUP_MENU) so the WM gives the window input focus —
+        # otherwise buttons need a focusing click first (felt unresponsive).
+        self.set_type_hint(Gdk.WindowTypeHint.UTILITY)
+        self.set_accept_focus(True)
         self.set_size_request(WIDTH, -1)
 
         self.connect("focus-out-event", self._on_focus_out)

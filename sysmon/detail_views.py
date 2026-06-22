@@ -4,7 +4,7 @@ looks exactly like the detailed panel and opens in the same spot, with a
 """
 import gi
 gi.require_version("Gtk", "3.0")
-from gi.repository import Gtk, Pango
+from gi.repository import Gtk, Gdk, Pango
 
 import cairo
 import psutil
@@ -27,13 +27,39 @@ class _MultiGraph(Gtk.DrawingArea):
         super().__init__()
         self._rows = []
         self._has_gpu = False
+        self.on_zoom = None
         self.set_size_request(-1, 220)
         self.connect("draw", self._draw)
+        self.add_events(Gdk.EventMask.SCROLL_MASK)
+        self.connect("scroll-event", self._on_scroll)
+
+    def _on_scroll(self, _w, event):
+        if self.on_zoom is None:
+            return False
+        d = getattr(event, "direction", None)
+        if d == Gdk.ScrollDirection.UP:
+            self.on_zoom(-1)        # zoom in (shorter window)
+        elif d == Gdk.ScrollDirection.DOWN:
+            self.on_zoom(+1)        # zoom out (longer window)
+        elif d == Gdk.ScrollDirection.SMOOTH:
+            ok, _dx, dy = event.get_scroll_deltas()
+            if ok and dy:
+                self.on_zoom(-1 if dy < 0 else +1)
+        return True
 
     def set_data(self, rows, has_gpu):
         self._rows = rows
         self._has_gpu = has_gpu
         self.queue_draw()
+
+    @staticmethod
+    def _gap_threshold(rows):
+        # A break (machine off) = a time gap far bigger than the normal spacing.
+        if len(rows) < 3:
+            return 60.0
+        dts = sorted(rows[i][0] - rows[i - 1][0] for i in range(1, len(rows)))
+        median = dts[len(dts) // 2] or 1.0
+        return max(15.0, 6.0 * median)
 
     def _draw(self, _w, cr):
         a = self.get_allocation()
@@ -60,17 +86,24 @@ class _MultiGraph(Gtk.DrawingArea):
         if len(rows) >= 2:
             t0, t1 = rows[0][0], rows[-1][0]
             span = max(1e-6, t1 - t0)
+            gap = self._gap_threshold(rows)
 
             def series(idx, colour):
                 cr.set_source_rgba(*colour, 0.95)
                 cr.set_line_width(1.6)
                 cr.set_line_join(cairo.LINE_JOIN_ROUND)
                 started = False
+                prev_t = None
                 for r in rows:
                     x = gx + (r[0] - t0) / span * gw
                     y = gy + gh * (1.0 - max(0.0, min(r[idx], 100.0)) / 100.0)
-                    cr.line_to(x, y) if started else cr.move_to(x, y)
+                    # Break the line across gaps (machine was off → blank).
+                    if not started or (prev_t is not None and r[0] - prev_t > gap):
+                        cr.move_to(x, y)
+                    else:
+                        cr.line_to(x, y)
                     started = True
+                    prev_t = r[0]
                 cr.stroke()
             series(1, _SERIES[0][1])
             series(2, _SERIES[1][1])
@@ -123,7 +156,19 @@ class HistoryPanel(CaretPanel):
         box.pack_start(legend, False, False, 2)
 
         self._graph = _MultiGraph()
+        self._graph.on_zoom = self._zoom
         box.pack_start(self._graph, True, True, 0)
+        hint = Gtk.Label(xalign=0.0)
+        hint.set_markup("<small>Scroll on the graph to zoom the time window "
+                        "in / out.</small>")
+        box.pack_start(hint, False, False, 0)
+
+    def _zoom(self, direction):
+        i = self._combo.get_active()
+        n = len(_WINDOWS)
+        i = max(0, min(n - 1, i + direction))
+        if i != self._combo.get_active():
+            self._combo.set_active(i)   # triggers refresh
 
     @staticmethod
     def _swatch(colour):

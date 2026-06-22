@@ -292,13 +292,23 @@ class PopupWindow(CaretPanel):
         root.pack_start(self._warn_box, False, False, 0)
 
         root.pack_start(Gtk.Separator(), False, False, 6)
-        foot = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=5)
-        for label, cb in (("Cores", self._on_cores_clicked),
-                          ("Settings", self._on_settings_clicked)):
+        # Row 1: drill-ins (same things the simple menu offers).
+        nav = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=5)
+        nav.set_homogeneous(True)
+        for label, view in (("History", "history"), ("Cores", "cores"),
+                            ("Disks", "disks"), ("Processes", "processes")):
             b = Gtk.Button(label=label)
             b.get_style_context().add_class("foot-btn")
-            b.connect("clicked", cb)
-            foot.pack_start(b, False, False, 0)
+            b.connect("clicked", lambda _w, v=view: self._nav(v))
+            nav.pack_start(b, True, True, 0)
+        root.pack_start(nav, False, False, 0)
+        # Row 2: settings / quit.
+        foot = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=5)
+        foot.set_margin_top(4)
+        settings_btn = Gtk.Button(label="Settings")
+        settings_btn.get_style_context().add_class("foot-btn")
+        settings_btn.connect("clicked", self._on_settings_clicked)
+        foot.pack_start(settings_btn, False, False, 0)
         quit_btn = Gtk.Button(label="Quit")
         quit_btn.get_style_context().add_class("foot-btn")
         quit_btn.connect("clicked", lambda *_: self._on_quit() if self._on_quit else None)
