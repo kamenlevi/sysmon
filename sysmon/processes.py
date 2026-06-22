@@ -210,38 +210,31 @@ def _is_system(proc: psutil.Process) -> bool:
 def collect_top_processes(n: int = 20, sort_by: str = "cpu") -> List[ProcessGroup]:
     """Return top N process groups, sorted by cpu or ram.
 
-    psutil.cpu_percent() per-process needs two samples to be non-zero.
-    We prime on first call, then wait 0.5s and collect real values.
+    Non-blocking: psutil.process_iter caches Process objects, so cpu_percent
+    is the delta since the previous call (~one poll interval). The very first
+    call reads ~0% CPU; every call after is accurate. No sleeping.
     """
     raw: dict = {}  # key=proc_name → aggregated data
 
     attrs = ["pid", "name", "cmdline", "cpu_percent", "memory_info",
              "memory_percent", "username", "status"]
 
-    # First pass: prime the cpu_percent counters
     try:
-        proc_list = list(psutil.process_iter(attrs))
+        proc_iter = psutil.process_iter(attrs)
     except Exception:
         return []
 
-    import time as _time
-    _time.sleep(0.5)
-
-    # Second pass: read actual values (cpu_percent now meaningful)
-    for p in proc_list:
+    for p in proc_iter:
         try:
-            name = p.name() or ""
-            status = p.status()
-            if not name or status == psutil.STATUS_ZOMBIE:
+            info = p.info
+            name = info.get("name") or ""
+            if not name or info.get("status") == psutil.STATUS_ZOMBIE:
                 continue
-            cpu = p.cpu_percent(interval=None) or 0.0
-            mi = p.memory_info()
+            cpu = info.get("cpu_percent") or 0.0
+            mi = info.get("memory_info")
             mem_mb = mi.rss / 1e6 if mi else 0.0
-            mem_pct = p.memory_percent() or 0.0
-            try:
-                cmdline = p.cmdline() or []
-            except (psutil.AccessDenied, psutil.ZombieProcess):
-                cmdline = []
+            mem_pct = info.get("memory_percent") or 0.0
+            cmdline = info.get("cmdline") or []
             pid = p.pid
             uid_is_system = _is_system(p)
 

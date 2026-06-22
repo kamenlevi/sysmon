@@ -122,22 +122,10 @@ def open_settings_dialog(settings: Settings, parent=None):
     sp_ram = spin("RAM warning (%)", "warn_ram_pct", 50, 100)
     sp_cpu_pct = spin("CPU load warning (%)", "warn_cpu_pct", 50, 100)
 
-    section("Display")
-    t_cpu = toggle("Show CPU", "show_cpu")
-    t_gpu = toggle("Show GPU", "show_gpu")
-    t_ram = toggle("Show RAM", "show_ram")
-    t_temp = toggle("Show temperatures", "show_temp")
-    t_label = toggle("Show text label in tray", "show_label")
-
     box.show_all()
 
     result = dlg.run()
     if result == Gtk.ResponseType.OK:
-        settings.show_cpu = t_cpu.get_active()
-        settings.show_gpu = t_gpu.get_active()
-        settings.show_ram = t_ram.get_active()
-        settings.show_temp = t_temp.get_active()
-        settings.show_label = t_label.get_active()
         settings.warn_cpu_temp = sp_cpu_temp.get_value_as_int()
         settings.warn_gpu_temp = sp_gpu_temp.get_value_as_int()
         settings.warn_ram_pct = sp_ram.get_value_as_int()

@@ -1,9 +1,8 @@
-"""Live per-core utilization window — like the Task Manager 'logical
-processors' grid. Each CPU core gets its own small scrolling graph of its
-utilization over time, plus a GPU utilization graph when a GPU is present.
+"""Per-core utilization view (an embeddable Gtk.Box, shown as a Stack page).
 
-Note: Linux exposes per-core CPU usage, but not per-shader-core GPU usage,
-so the GPU is shown as one overall-utilisation graph + VRAM.
+Each CPU core (and the GPU) gets a small history graph over a selectable
+time window, fed from a rolling buffer so the past is available, not just
+realtime. Gaps (machine off) are left blank.
 """
 import gi
 gi.require_version("Gtk", "3.0")
@@ -12,19 +11,24 @@ from gi.repository import Gtk
 import cairo
 
 from .monitor import SystemStats
-from .panel_base import CaretPanel
 
-_COLS = 2          # cores laid out in this many columns
+_COLS = 2
 _WINDOWS = [("1 min", 60), ("5 min", 300), ("15 min", 900), ("All", None)]
 
 
-class _CoreGraph(Gtk.DrawingArea):
-    """An area-graph of one value's history (a list of (ts, pct)) over a
-    selectable time window, with gaps left blank where the machine was off."""
+def _fmt_span(sec):
+    sec = int(sec)
+    if sec >= 3600:
+        return f"{sec/3600:.1f} h"
+    if sec >= 60:
+        return f"{sec//60} min"
+    return f"{sec} s"
 
+
+class _CoreGraph(Gtk.DrawingArea):
     def __init__(self, width=150, height=40):
         super().__init__()
-        self._series = []     # (ts, val)
+        self._series = []
         self._window = 300
         self.set_size_request(width, height)
         self.connect("draw", self._draw)
@@ -55,8 +59,7 @@ class _CoreGraph(Gtk.DrawingArea):
         if len(pts) < 2:
             return
         dts = sorted(pts[i][0] - pts[i - 1][0] for i in range(1, len(pts)))
-        median = dts[len(dts) // 2] or 1.0
-        gap = max(15.0, 6.0 * median)
+        gap = max(15.0, 6.0 * (dts[len(dts) // 2] or 1.0))
 
         def x_of(t):
             return (t - t0) / span * w
@@ -64,7 +67,6 @@ class _CoreGraph(Gtk.DrawingArea):
         def y_of(v):
             return (h - 1) - (max(0.0, min(v, 100.0)) / 100.0) * (h - 2)
 
-        # Line with gap breaks
         cr.set_source_rgba(0.24, 0.36, 0.60, 0.95)
         cr.set_line_width(1.3)
         cr.set_line_join(cairo.LINE_JOIN_ROUND)
@@ -97,36 +99,36 @@ class _GraphCell(Gtk.Box):
         self.label.set_markup(f"<small><b>{text}</b></small>")
 
 
-class CoresPanel(CaretPanel):
+class CoresView(Gtk.Box):
+    title = "CPU / GPU cores"
+
     def __init__(self):
-        super().__init__("CPU / GPU cores", show_back=True)
-        self.autohide = False
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self._hist = []
-        root = self.body
+        self._last_s = None
 
         ctrl = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         ctrl.pack_start(Gtk.Label(label="History:"), False, False, 0)
         self._combo = Gtk.ComboBoxText()
         for label, secs in _WINDOWS:
             self._combo.append("none" if secs is None else str(secs), label)
-        self._combo.set_active(1)   # 5 min
+        self._combo.set_active(1)
         self._combo.connect("changed", lambda *_: self._redraw())
         ctrl.pack_start(self._combo, False, False, 0)
         self._span_lbl = Gtk.Label(xalign=1.0)
         self._span_lbl.set_markup("<small>—</small>")
         ctrl.pack_end(self._span_lbl, True, True, 0)
-        root.pack_start(ctrl, False, False, 2)
+        self.pack_start(ctrl, False, False, 2)
 
         self._cpu_header = Gtk.Label(xalign=0)
         self._cpu_header.set_markup("<b>CPU cores</b>")
-        root.pack_start(self._cpu_header, False, False, 2)
+        self.pack_start(self._cpu_header, False, False, 2)
 
         scroll = Gtk.ScrolledWindow()
         scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        scroll.set_min_content_height(320)
-        scroll.set_max_content_height(380)
-        root.pack_start(scroll, True, True, 0)
-
+        scroll.set_min_content_height(300)
+        scroll.set_max_content_height(360)
+        self.pack_start(scroll, True, True, 0)
         self._cpu_grid = Gtk.Grid()
         self._cpu_grid.set_column_spacing(12)
         self._cpu_grid.set_row_spacing(8)
@@ -134,13 +136,12 @@ class CoresPanel(CaretPanel):
         scroll.add(self._cpu_grid)
         self._core_cells = []
 
-        # GPU
         self._gpu_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         self._gpu_box.set_no_show_all(True)
-        root.pack_start(self._gpu_box, False, False, 0)
-        gpu_header = Gtk.Label(xalign=0)
-        gpu_header.set_markup("<b>GPU</b>")
-        self._gpu_box.pack_start(gpu_header, False, False, 0)
+        self.pack_start(self._gpu_box, False, False, 0)
+        gh = Gtk.Label(xalign=0)
+        gh.set_markup("<b>GPU</b>")
+        self._gpu_box.pack_start(gh, False, False, 0)
         self._gpu_cell = _GraphCell("Usage")
         self._gpu_box.pack_start(self._gpu_cell, False, False, 0)
 
@@ -166,7 +167,7 @@ class CoresPanel(CaretPanel):
         self._redraw()
 
     def _redraw(self):
-        s = getattr(self, "_last_s", None)
+        s = self._last_s
         hist = self._hist
         if s is None:
             return
@@ -174,40 +175,21 @@ class CoresPanel(CaretPanel):
         self._ensure_cores(len(cores))
         self._cpu_header.set_markup(f"<b>CPU — {len(cores)} cores</b>")
         window = self._window()
-
         for i, cell in enumerate(self._core_cells):
             series = [(t, c[i]) for (t, c, _g) in hist if i < len(c)]
-            cur = cores[i] if i < len(cores) else 0.0
-            cell.update(series, window, cur)
-
+            cell.update(series, window, cores[i] if i < len(cores) else 0.0)
         if s.gpu_available:
             self._gpu_box.set_visible(True)
             suffix = ""
             if s.gpu_mem_total_mb > 0:
-                suffix = (f"VRAM {s.gpu_mem_used_mb/1024:.1f}/"
-                          f"{s.gpu_mem_total_mb/1024:.1f}G")
-            if s.gpu_temp > 0:
-                suffix += (f"  {s.gpu_temp:.0f}°C" if suffix else f"{s.gpu_temp:.0f}°C")
+                suffix = f"VRAM {s.gpu_mem_used_mb/1024:.1f}/{s.gpu_mem_total_mb/1024:.1f}G"
             gseries = [(t, g) for (t, _c, g) in hist if g is not None]
             self._gpu_cell.update(gseries, window, s.gpu_percent, suffix)
         else:
             self._gpu_box.set_visible(False)
-
-        # Time-span label so it's clear how much is shown.
         if len(hist) >= 2:
             actual = hist[-1][0] - hist[0][0]
             shown = actual if window is None else min(window, actual)
-            self._span_lbl.set_markup(
-                f"<small>showing last {_fmt_span(shown)}</small>")
+            self._span_lbl.set_markup(f"<small>showing last {_fmt_span(shown)}</small>")
         else:
             self._span_lbl.set_markup("<small>collecting…</small>")
-
-
-def _fmt_span(sec):
-    sec = int(sec)
-    if sec >= 3600:
-        return f"{sec/3600:.1f} h"
-    if sec >= 60:
-        return f"{sec//60} min"
-    return f"{sec} s"
-

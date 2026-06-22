@@ -166,8 +166,7 @@ class _MetricRow(Gtk.Box):
         self.pack_start(header, False, False, 0)
 
         self.revealer = Gtk.Revealer()
-        self.revealer.set_transition_type(Gtk.RevealerTransitionType.SLIDE_DOWN)
-        self.revealer.set_transition_duration(90)
+        self.revealer.set_transition_type(Gtk.RevealerTransitionType.NONE)
         self.detail_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
         self.detail_box.set_margin_start(4)
         self.detail_box.set_margin_top(4)
@@ -218,18 +217,20 @@ class _InfoRow(Gtk.Box):
 
 class PopupWindow(CaretPanel):
 
-    def __init__(self, on_open_app, settings, on_settings=None, on_quit=None,
-                 on_cores=None, on_set_default=None, on_nav=None):
+    def __init__(self, settings, history_db, on_open_app=None,
+                 on_settings=None, on_quit=None):
         super().__init__("System Monitor", show_back=False)
         _apply_css()
         self.on_open_app = on_open_app
         self.settings = settings
+        self._history_db = history_db
         self._on_settings = on_settings
         self._on_quit = on_quit
-        self._on_cores = on_cores
-        self.on_nav = on_nav
         self._fan_controller = None
         self._last = None
+        self._last_procs = []
+        self._core_hist = []
+        self._nav_stack = []
         self._prev_disk = psutil.disk_io_counters()
         try:
             _per = psutil.net_io_counters(pernic=True)
@@ -240,7 +241,14 @@ class PopupWindow(CaretPanel):
             self._prev_net = (0, 0)
         self._prev_t = time.monotonic()
 
-        root = self.body
+        # All views live in one Stack so switching between them is instant
+        # (no window map/unmap, no WM animation).
+        self.stack = Gtk.Stack()
+        self.stack.set_transition_type(Gtk.StackTransitionType.NONE)
+        self.body.pack_start(self.stack, True, True, 0)
+
+        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self.stack.add_named(root, "overview")
 
         self._cpu = _MetricRow("CPU")
         root.pack_start(self._cpu, False, False, 0)
@@ -279,7 +287,7 @@ class PopupWindow(CaretPanel):
         root.pack_start(self._load, False, False, 1)
         self._uptime = _InfoRow("Uptime")
         self._uptime.set_tooltip_text("Click for the full process list")
-        root.pack_start(_click_wrap(self._uptime, lambda: self._nav("processes")),
+        root.pack_start(_click_wrap(self._uptime, lambda: self._navigate("processes")),
                         False, False, 1)
 
         root.pack_start(Gtk.Separator(), False, False, 6)
@@ -311,7 +319,7 @@ class PopupWindow(CaretPanel):
                             ("Processes", "processes")):
             b = Gtk.Button(label=label)
             b.get_style_context().add_class("foot-btn")
-            b.connect("clicked", lambda _w, v=view: self._nav(v))
+            b.connect("clicked", lambda _w, v=view: self._navigate(v))
             nav.pack_start(b, True, True, 0)
         root.pack_start(nav, False, False, 0)
         # Row 2: settings / quit.
@@ -327,29 +335,81 @@ class PopupWindow(CaretPanel):
         foot.pack_end(quit_btn, False, False, 0)
         root.pack_start(foot, False, False, 0)
 
+        # ── Drill-in pages (embedded views) ─────────────────────────────
+        from .cores_window import CoresView
+        from .detail_views import HistoryView, ProcessesView, DisksView
+        self._cores_view = CoresView()
+        self._hist_view = HistoryView(history_db, settings)
+        self._proc_view = ProcessesView()
+        self._disks_view = DisksView()
+        for name, view in (("cores", self._cores_view),
+                           ("history", self._hist_view),
+                           ("processes", self._proc_view),
+                           ("disks", self._disks_view)):
+            self.stack.add_named(view, name)
+
         self.show_all()
         self.hide()
+
+    # ── Stack navigation ────────────────────────────────────────────────
+    _TITLES = {"overview": "System Monitor", "cores": "CPU / GPU cores",
+               "history": "Usage history", "processes": "Processes",
+               "disks": "Disks"}
+
+    def show_page(self, name):
+        self.stack.set_visible_child_name(name)
+        self.title_lbl.set_markup(f"<b>{self._TITLES.get(name, name)}</b>")
+        self.back_btn.set_visible(name != "overview")
+        self._refresh_page(name)
+
+    def open_to(self, name):
+        """Open straight to a page (from the menu) — back will just close."""
+        self._nav_stack = []
+        self.show_page(name)
+
+    def _navigate(self, name):
+        """Drill into a page from the overview — back returns to it."""
+        self._nav_stack.append(self.stack.get_visible_child_name() or "overview")
+        self.show_page(name)
+
+    def _do_back(self):
+        if self._nav_stack:
+            self.show_page(self._nav_stack.pop())
+        else:
+            self.hide()
+
+    def _refresh_page(self, name):
+        if name == "overview":
+            if self._last is not None:
+                self._update_overview(self._last, self._last_procs)
+        elif name == "cores":
+            if self._last is not None:
+                self._cores_view.update(self._last, self._core_hist)
+        elif name == "history":
+            self._hist_view.refresh()
+        elif name == "processes":
+            self._proc_view.refresh()
+        elif name == "disks":
+            self._disks_view.refresh()
+
+    def update(self, s: SystemStats, procs=None, core_hist=None):
+        """Called every tick while visible — refresh only the visible page."""
+        self._last = s
+        if procs is not None:
+            self._last_procs = procs
+        if core_hist is not None:
+            self._core_hist = core_hist
+        self._refresh_page(self.stack.get_visible_child_name() or "overview")
 
     def _deferred(self, fn):
         if self._last is not None:
             fn(self._last)
         return False
 
-    # ── nav / buttons ───────────────────────────────────────────────────
-    def _nav(self, view):
-        self.hide()
-        if self.on_nav:
-            self.on_nav(view)
-
+    # ── buttons ──────────────────────────────────────────────────────────
     def _on_settings_clicked(self, *_):
-        self.hide()
         if self._on_settings:
             self._on_settings()
-
-    def _on_cores_clicked(self, *_):
-        self.hide()
-        if self._on_cores:
-            self._on_cores()
 
     # ── per-component detail ────────────────────────────────────────────
     def _detail_line(self, box, name):
@@ -532,9 +592,8 @@ class PopupWindow(CaretPanel):
         return out
 
     # ── update ──────────────────────────────────────────────────────────
-    def update(self, s: SystemStats, procs=None):
+    def _update_overview(self, s: SystemStats, procs=None):
         cfg = self.settings
-        self._last = s
         ex = self._extras()
 
         freq = f"{s.cpu_freq_mhz/1000:.1f} GHz" if s.cpu_freq_mhz > 0 else ""

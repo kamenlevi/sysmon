@@ -64,28 +64,17 @@ class SysMonIndicator:
         )
         self._fan_controller.start()
 
-        # Detailed panel + drill-in panels — all share the caret-panel style
-        # and the same on-screen position.
+        # One panel window hosting every view (overview + drill-ins) in a
+        # Stack — switching is instant, no window map/unmap lag.
         self._panel_geom = None
         self._popup = PopupWindow(
-            on_open_app=self._show_main_window,
             settings=settings,
+            history_db=history,
+            on_open_app=self._show_main_window,
             on_settings=lambda: self._on_settings(),
             on_quit=Gtk.main_quit,
-            on_cores=lambda: self._open_view("cores", via="panel"),
-            on_nav=lambda v: self._open_view(v, via="panel"),
         )
         self._popup._fan_controller = self._fan_controller
-
-        from .cores_window import CoresPanel
-        from .detail_views import HistoryPanel, ProcessesPanel, DisksPanel
-        self._cores = CoresPanel()
-        self._history = HistoryPanel(history, settings)
-        self._proc = ProcessesPanel()
-        self._disks = DisksPanel()
-        # The back arrow on any drill-in returns to the detailed panel.
-        for p in (self._cores, self._history, self._proc, self._disks):
-            p.on_back = lambda: self._open_view("panel", fresh=False)
 
         if _HAS_INDICATOR:
             self._indicator = AppIndicator.Indicator.new(
@@ -124,20 +113,18 @@ class SysMonIndicator:
         self._mi_gpu.set_no_show_all(True)
         self._mi_ram, self._ram_items = gauge_row()
         self._mi_disk, self._disk_items = gauge_row()
-
-        self._mi_net = Gtk.MenuItem(label="")
-        self._mi_net.set_sensitive(False)
-        menu.append(self._mi_net)
+        # (Network line omitted from the menu — its variable width was the
+        # only thing that made the menu wobble. It's in the detailed panel.)
 
         menu.append(Gtk.SeparatorMenuItem())
 
         # (Disks omitted — the Disk row's submenu already lists every disk.)
-        for label, view in (("Detailed panel…", "panel"),
+        for label, view in (("Detailed panel…", "overview"),
                             ("Processes…", "processes"),
                             ("Usage history…", "history"),
                             ("CPU / GPU cores…", "cores")):
             it = Gtk.MenuItem(label=label)
-            it.connect("activate", lambda _w, v=view: self._open_view(v, via="menu"))
+            it.connect("activate", lambda _w, v=view: self._open_view(v))
             menu.append(it)
 
         menu.append(Gtk.SeparatorMenuItem())
@@ -252,52 +239,24 @@ class SysMonIndicator:
                         f"Disk   {_pct3(disk_pct)}%")
         self._fill_items(self._disk_items, self._disk_lines())
 
-        down, up = self._net_rate
-        _mono(self._mi_net, f"Network   ↓ {_rate(down)}   ↑ {_rate(up)}")
-
     # ── View opening ─────────────────────────────────────────────────────────
 
-    def _panels(self):
-        return (self._popup, self._cores, self._history, self._proc, self._disks)
-
-    def _open_view(self, view, via="menu", fresh=None):
+    def _open_view(self, page):
         from .panel_base import CaretPanel
-        # Opens from the menu appear under the cursor; navigation reuses that
-        # spot. A drill-in opened from the menu has NO back target (back just
-        # closes); one opened from the panel goes back to the panel.
-        if fresh is None:
-            fresh = (via == "menu")
-        if fresh or self._panel_geom is None:
+        if not self._popup.get_visible():
             self._panel_geom = CaretPanel.cursor_geometry()
-
-        target = {"panel": self._popup, "cores": self._cores,
-                  "history": self._history, "processes": self._proc,
-                  "disks": self._disks}.get(view)
-        if target is None:
-            return
-
-        if hasattr(target, "on_back"):
-            target.on_back = (lambda: self._open_view("panel", via="panel")) \
-                if via == "panel" else None
-
-        # Show immediately for snappiness, then fill content on idle.
-        for p in self._panels():
-            if p is not target:
-                p.hide()
-        target.show_at(*self._panel_geom)
-        GLib.idle_add(self._refresh_target, target)
-
-    def _refresh_target(self, target):
-        if target is self._popup:
-            target.update(self._last_stats, self._collect_procs(6))
-        elif target is self._cores:
-            target.update(self._last_stats, self._core_hist)
+            self._popup.open_to(page)
+            self._popup.update(self._last_stats, self._collect_procs(6),
+                               self._core_hist)
+            self._popup.show_at(*self._panel_geom)
         else:
-            target.refresh()
-        return False
+            # Already open — just switch page (instant, no remap).
+            self._popup.open_to(page)
+            self._popup.update(self._last_stats, self._collect_procs(6),
+                               self._core_hist)
 
-    def _open_panel(self, via="menu"):
-        self._open_view("panel", via=via)
+    def _open_panel(self):
+        self._open_view("overview")
 
     def _collect_procs(self, n):
         try:
@@ -342,15 +301,7 @@ class SysMonIndicator:
         procs = self._collect_procs(8)
         GLib.idle_add(self._refresh_menu, s, procs)
         if self._popup.get_visible():
-            GLib.idle_add(self._popup.update, s, procs)
-        if self._cores.get_visible():
-            GLib.idle_add(self._cores.update, s, self._core_hist)
-        if self._proc.get_visible():
-            GLib.idle_add(self._proc.refresh)
-        if self._disks.get_visible():
-            GLib.idle_add(self._disks.refresh)
-        if self._history.get_visible():
-            GLib.idle_add(self._history.refresh)
+            GLib.idle_add(self._popup.update, s, procs, self._core_hist)
         self._maybe_notify(s)
 
     def _maybe_notify(self, s: SystemStats):

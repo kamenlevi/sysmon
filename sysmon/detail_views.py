@@ -1,7 +1,12 @@
-"""Drill-in panels (history, processes, disks) — each a caret panel that
-looks exactly like the detailed panel and opens in the same spot, with a
-← back arrow that returns to the detailed panel.
+"""Drill-in views as embeddable Gtk.Box widgets (shown as Stack pages in the
+panel, so switching to them is instant — no window map/unmap).
+
+  HistoryView   — CPU/RAM/GPU over a selectable window (hover readout, scroll zoom)
+  ProcessesView — full process list (updates in place) with kill
+  DisksView     — usage of every mounted disk
 """
+import time
+
 import gi
 gi.require_version("Gtk", "3.0")
 from gi.repository import Gtk, Gdk, Pango
@@ -9,11 +14,8 @@ from gi.repository import Gtk, Gdk, Pango
 import cairo
 import psutil
 
-from .panel_base import CaretPanel, WIDTH
 from .processes import collect_top_processes, terminate_group
 
-
-# ── History ─────────────────────────────────────────────────────────────────
 
 _WINDOWS = [("5 min", 300), ("30 min", 1800), ("1 hour", 3600),
             ("6 hours", 21600), ("24 hours", 86400)]
@@ -38,6 +40,20 @@ class _MultiGraph(Gtk.DrawingArea):
         self.connect("motion-notify-event", self._on_motion)
         self.connect("leave-notify-event", self._on_leave)
 
+    def _on_scroll(self, _w, event):
+        if self.on_zoom is None:
+            return False
+        d = getattr(event, "direction", None)
+        if d == Gdk.ScrollDirection.UP:
+            self.on_zoom(-1)
+        elif d == Gdk.ScrollDirection.DOWN:
+            self.on_zoom(+1)
+        elif d == Gdk.ScrollDirection.SMOOTH:
+            ok, _dx, dy = event.get_scroll_deltas()
+            if ok and dy:
+                self.on_zoom(-1 if dy < 0 else +1)
+        return True
+
     def _on_motion(self, _w, event):
         self._mx = event.x
         self.queue_draw()
@@ -48,20 +64,6 @@ class _MultiGraph(Gtk.DrawingArea):
         self.queue_draw()
         return False
 
-    def _on_scroll(self, _w, event):
-        if self.on_zoom is None:
-            return False
-        d = getattr(event, "direction", None)
-        if d == Gdk.ScrollDirection.UP:
-            self.on_zoom(-1)        # zoom in (shorter window)
-        elif d == Gdk.ScrollDirection.DOWN:
-            self.on_zoom(+1)        # zoom out (longer window)
-        elif d == Gdk.ScrollDirection.SMOOTH:
-            ok, _dx, dy = event.get_scroll_deltas()
-            if ok and dy:
-                self.on_zoom(-1 if dy < 0 else +1)
-        return True
-
     def set_data(self, rows, has_gpu):
         self._rows = rows
         self._has_gpu = has_gpu
@@ -69,12 +71,10 @@ class _MultiGraph(Gtk.DrawingArea):
 
     @staticmethod
     def _gap_threshold(rows):
-        # A break (machine off) = a time gap far bigger than the normal spacing.
         if len(rows) < 3:
             return 60.0
         dts = sorted(rows[i][0] - rows[i - 1][0] for i in range(1, len(rows)))
-        median = dts[len(dts) // 2] or 1.0
-        return max(15.0, 6.0 * median)
+        return max(15.0, 6.0 * (dts[len(dts) // 2] or 1.0))
 
     def _draw(self, _w, cr):
         a = self.get_allocation()
@@ -97,89 +97,81 @@ class _MultiGraph(Gtk.DrawingArea):
             cr.set_source_rgba(0.6, 0.6, 0.6, 1.0)
             cr.move_to(4, y + 3)
             cr.show_text(f"{int(100*(1-frac))}")
+
         rows = self._rows
-        if len(rows) >= 2:
-            t0, t1 = rows[0][0], rows[-1][0]
-            span = max(1e-6, t1 - t0)
-            gap = self._gap_threshold(rows)
-
-            def series(idx, colour):
-                cr.set_source_rgba(*colour, 0.95)
-                cr.set_line_width(1.6)
-                cr.set_line_join(cairo.LINE_JOIN_ROUND)
-                started = False
-                prev_t = None
-                for r in rows:
-                    x = gx + (r[0] - t0) / span * gw
-                    y = gy + gh * (1.0 - max(0.0, min(r[idx], 100.0)) / 100.0)
-                    # Break the line across gaps (machine was off → blank).
-                    if not started or (prev_t is not None and r[0] - prev_t > gap):
-                        cr.move_to(x, y)
-                    else:
-                        cr.line_to(x, y)
-                    started = True
-                    prev_t = r[0]
-                cr.stroke()
-            series(1, _SERIES[0][1])
-            series(2, _SERIES[1][1])
-            if self._has_gpu:
-                series(3, _SERIES[2][1])
-
-            # Hover crosshair + readout
-            if self._mx is not None and gx <= self._mx <= gx + gw:
-                tt = t0 + (self._mx - gx) / gw * span
-                row = min(rows, key=lambda r: abs(r[0] - tt))
-                hx = gx + (row[0] - t0) / span * gw
-                cr.set_source_rgba(0.4, 0.4, 0.4, 0.7)
-                cr.set_line_width(1.0)
-                cr.move_to(hx, gy)
-                cr.line_to(hx, gy + gh)
-                cr.stroke()
-                # focus dots
-                vals = [("CPU", row[1]), ("RAM", row[2])]
-                if self._has_gpu:
-                    vals.append(("GPU", row[3]))
-                for (name, v), (_n, colour) in zip(vals, _SERIES):
-                    yy = gy + gh * (1.0 - max(0.0, min(v, 100.0)) / 100.0)
-                    cr.set_source_rgba(*colour, 1.0)
-                    cr.arc(hx, yy, 2.5, 0, 6.2832)
-                    cr.fill()
-                # readout box
-                import time as _t
-                when = _t.strftime("%H:%M:%S", _t.localtime(row[0]))
-                lines = [when] + [f"{n}: {v:.0f}%" for n, v in vals]
-                cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL,
-                                    cairo.FONT_WEIGHT_NORMAL)
-                cr.set_font_size(10)
-                bw = max(cr.text_extents(t).width for t in lines) + 10
-                bh = 13 * len(lines) + 6
-                bx = min(hx + 8, gx + gw - bw)
-                by = gy + 4
-                cr.set_source_rgba(1, 1, 1, 0.92)
-                cr.rectangle(bx, by, bw, bh)
-                cr.fill()
-                cr.set_source_rgba(0.8, 0.8, 0.8, 1)
-                cr.set_line_width(1)
-                cr.rectangle(bx + 0.5, by + 0.5, bw - 1, bh - 1)
-                cr.stroke()
-                cr.set_source_rgba(0.15, 0.15, 0.15, 1)
-                for i, t in enumerate(lines):
-                    cr.move_to(bx + 5, by + 12 + i * 13)
-                    cr.show_text(t)
-        else:
+        if len(rows) < 2:
             cr.set_source_rgba(0.6, 0.6, 0.6, 1.0)
             cr.set_font_size(12)
             cr.move_to(gx + 10, gy + gh / 2)
             cr.show_text("Collecting history…")
+            return
+
+        t0, t1 = rows[0][0], rows[-1][0]
+        span = max(1e-6, t1 - t0)
+        gap = self._gap_threshold(rows)
+
+        def series(idx, colour):
+            cr.set_source_rgba(*colour, 0.95)
+            cr.set_line_width(1.6)
+            cr.set_line_join(cairo.LINE_JOIN_ROUND)
+            prev_t = None
+            for r in rows:
+                x = gx + (r[0] - t0) / span * gw
+                y = gy + gh * (1.0 - max(0.0, min(r[idx], 100.0)) / 100.0)
+                if prev_t is None or r[0] - prev_t > gap:
+                    cr.move_to(x, y)
+                else:
+                    cr.line_to(x, y)
+                prev_t = r[0]
+            cr.stroke()
+        series(1, _SERIES[0][1])
+        series(2, _SERIES[1][1])
+        if self._has_gpu:
+            series(3, _SERIES[2][1])
+
+        if self._mx is not None and gx <= self._mx <= gx + gw:
+            tt = t0 + (self._mx - gx) / gw * span
+            row = min(rows, key=lambda r: abs(r[0] - tt))
+            hx = gx + (row[0] - t0) / span * gw
+            cr.set_source_rgba(0.4, 0.4, 0.4, 0.7)
+            cr.set_line_width(1.0)
+            cr.move_to(hx, gy)
+            cr.line_to(hx, gy + gh)
+            cr.stroke()
+            vals = [("CPU", row[1]), ("RAM", row[2])]
+            if self._has_gpu:
+                vals.append(("GPU", row[3]))
+            for (name, v), (_n, colour) in zip(vals, _SERIES):
+                yy = gy + gh * (1.0 - max(0.0, min(v, 100.0)) / 100.0)
+                cr.set_source_rgba(*colour, 1.0)
+                cr.arc(hx, yy, 2.5, 0, 6.2832)
+                cr.fill()
+            when = time.strftime("%H:%M:%S", time.localtime(row[0]))
+            lines = [when] + [f"{n}: {v:.0f}%" for n, v in vals]
+            cr.set_font_size(10)
+            bw = max(cr.text_extents(t).width for t in lines) + 10
+            bh = 13 * len(lines) + 6
+            bx = min(hx + 8, gx + gw - bw)
+            by = gy + 4
+            cr.set_source_rgba(1, 1, 1, 0.92)
+            cr.rectangle(bx, by, bw, bh)
+            cr.fill()
+            cr.set_source_rgba(0.8, 0.8, 0.8, 1)
+            cr.rectangle(bx + 0.5, by + 0.5, bw - 1, bh - 1)
+            cr.stroke()
+            cr.set_source_rgba(0.15, 0.15, 0.15, 1)
+            for i, t in enumerate(lines):
+                cr.move_to(bx + 5, by + 12 + i * 13)
+                cr.show_text(t)
 
 
-class HistoryPanel(CaretPanel):
+class HistoryView(Gtk.Box):
+    title = "Usage history"
+
     def __init__(self, history_db, settings):
-        super().__init__("Usage history", show_back=True)
-        self.autohide = False
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self.history = history_db
         self.settings = settings
-        box = self.body
 
         ctrl = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         ctrl.pack_start(Gtk.Label(label="Window:"), False, False, 0)
@@ -196,7 +188,7 @@ class HistoryPanel(CaretPanel):
         setd = Gtk.Button(label="Set default")
         setd.connect("clicked", self._set_default)
         ctrl.pack_end(setd, False, False, 0)
-        box.pack_start(ctrl, False, False, 4)
+        self.pack_start(ctrl, False, False, 4)
 
         legend = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=14)
         self._legend = {}
@@ -210,22 +202,14 @@ class HistoryPanel(CaretPanel):
             self._legend[name] = lbl
             it.pack_start(lbl, False, False, 0)
             legend.pack_start(it, False, False, 0)
-        box.pack_start(legend, False, False, 2)
+        self.pack_start(legend, False, False, 2)
 
         self._graph = _MultiGraph()
         self._graph.on_zoom = self._zoom
-        box.pack_start(self._graph, True, True, 0)
+        self.pack_start(self._graph, True, True, 0)
         hint = Gtk.Label(xalign=0.0)
-        hint.set_markup("<small>Scroll on the graph to zoom the time window "
-                        "in / out.</small>")
-        box.pack_start(hint, False, False, 0)
-
-    def _zoom(self, direction):
-        i = self._combo.get_active()
-        n = len(_WINDOWS)
-        i = max(0, min(n - 1, i + direction))
-        if i != self._combo.get_active():
-            self._combo.set_active(i)   # triggers refresh
+        hint.set_markup("<small>Scroll to zoom · hover for values.</small>")
+        self.pack_start(hint, False, False, 0)
 
     @staticmethod
     def _swatch(colour):
@@ -236,6 +220,11 @@ class HistoryPanel(CaretPanel):
             cr.fill()
             return False
         return draw
+
+    def _zoom(self, direction):
+        i = max(0, min(len(_WINDOWS) - 1, self._combo.get_active() + direction))
+        if i != self._combo.get_active():
+            self._combo.set_active(i)
 
     def _set_default(self, *_):
         self.settings.history_default_window = int(self._combo.get_active_id())
@@ -260,14 +249,13 @@ class HistoryPanel(CaretPanel):
             self._legend["GPU"].set_text(f"GPU {last[3]:.0f}%" if has_gpu else "GPU —")
 
 
-# ── Processes ────────────────────────────────────────────────────────────────
+class ProcessesView(Gtk.Box):
+    title = "Processes"
+    _ROWS = 30
 
-class ProcessesPanel(CaretPanel):
     def __init__(self):
-        super().__init__("Processes", show_back=True)
-        self.autohide = False
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self._sort = "cpu"
-        box = self.body
 
         bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         bar.pack_start(Gtk.Label(label="Sort:"), False, False, 0)
@@ -277,15 +265,39 @@ class ProcessesPanel(CaretPanel):
         self._sort_combo.set_active(0)
         self._sort_combo.connect("changed", self._on_sort)
         bar.pack_start(self._sort_combo, False, False, 0)
-        box.pack_start(bar, False, False, 4)
+        self.pack_start(bar, False, False, 4)
 
         scroll = Gtk.ScrolledWindow()
         scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         scroll.set_min_content_height(360)
         scroll.set_max_content_height(360)
-        self._list = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
-        scroll.add(self._list)
-        box.pack_start(scroll, True, True, 0)
+        lst = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
+        scroll.add(lst)
+        self.pack_start(scroll, True, True, 0)
+
+        # Fixed pool of rows, updated in place (never rebuilt → no scroll crash).
+        self._rows = []
+        for _ in range(self._ROWS):
+            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+            name = Gtk.Label(xalign=0.0)
+            name.set_ellipsize(Pango.EllipsizeMode.END)
+            cpu = Gtk.Label(xalign=1.0)
+            cpu.set_size_request(54, -1)
+            ram = Gtk.Label(xalign=1.0)
+            ram.set_size_request(74, -1)
+            kill = Gtk.Button(label="✕")
+            kill.set_relief(Gtk.ReliefStyle.NONE)
+            row.pack_start(name, True, True, 0)
+            row.pack_start(cpu, False, False, 0)
+            row.pack_start(ram, False, False, 0)
+            row.pack_start(kill, False, False, 0)
+            row._pids = []
+            kill.connect("clicked", self._mk_kill(row))
+            lst.pack_start(row, False, False, 0)
+            row.show_all()
+            row.set_no_show_all(True)
+            row.hide()
+            self._rows.append((row, name, cpu, ram))
 
     def _on_sort(self, *_):
         self._sort = self._sort_combo.get_active_id()
@@ -293,59 +305,47 @@ class ProcessesPanel(CaretPanel):
 
     def refresh(self):
         try:
-            procs = collect_top_processes(25, sort_by=self._sort)
+            procs = collect_top_processes(self._ROWS, sort_by=self._sort)
         except Exception:
             procs = []
-        for c in self._list.get_children():
-            self._list.remove(c)
-        for p in procs:
-            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-            name = Gtk.Label(label=p.name, xalign=0.0)
-            name.set_ellipsize(Pango.EllipsizeMode.END)
-            cpu = Gtk.Label(label=f"{p.cpu_percent:.0f}%", xalign=1.0)
-            cpu.set_size_request(54, -1)
-            ram = Gtk.Label(label=f"{p.ram_mb:.0f}MB", xalign=1.0)
-            ram.set_size_request(74, -1)
-            kill = Gtk.Button(label="✕")
-            kill.set_relief(Gtk.ReliefStyle.NONE)
-            kill.set_tooltip_text(f"Terminate {p.name}")
-            kill.connect("clicked", self._mk_kill(p))
-            row.pack_start(name, True, True, 0)
-            row.pack_start(cpu, False, False, 0)
-            row.pack_start(ram, False, False, 0)
-            row.pack_start(kill, False, False, 0)
-            self._list.pack_start(row, False, False, 0)
-        self._list.show_all()
+        for i, (row, name, cpu, ram) in enumerate(self._rows):
+            if i < len(procs):
+                p = procs[i]
+                row._pids = list(p.pids)
+                name.set_text(p.name)
+                cpu.set_text(f"{p.cpu_percent:.0f}%")
+                ram.set_text(f"{p.ram_mb:.0f}MB")
+                row.set_visible(True)
+            else:
+                row.set_visible(False)
 
-    def _mk_kill(self, group):
+    def _mk_kill(self, row):
         def on_click(_b):
             try:
-                terminate_group(group.pids)
+                terminate_group(row._pids)
             except Exception:
                 pass
             self.refresh()
         return on_click
 
 
-# ── Disks ────────────────────────────────────────────────────────────────────
-
 def _fmt_gb(n):
     return f"{n/(1024**3):.1f} GB"
 
 
-class DisksPanel(CaretPanel):
+class DisksView(Gtk.Box):
+    title = "Disks"
     _SKIP = {"squashfs", "tmpfs", "devtmpfs", "overlay", "autofs", "ramfs", ""}
 
     def __init__(self):
-        super().__init__("Disks", show_back=True)
-        self.autohide = False
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         scroll = Gtk.ScrolledWindow()
         scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         scroll.set_min_content_height(300)
         scroll.set_max_content_height(360)
         self._box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
         scroll.add(self._box)
-        self.body.pack_start(scroll, True, True, 0)
+        self.pack_start(scroll, True, True, 0)
 
     def refresh(self):
         for c in self._box.get_children():
