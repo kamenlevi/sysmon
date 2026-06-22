@@ -55,6 +55,7 @@ class CaretPanel(Gtk.Window):
         self.on_back = None
         self._shown_at = 0.0
         self._caret_x = WIDTH / 2.0
+        self._popover_open = False
 
         apply_css()
         screen = self.get_screen()
@@ -144,7 +145,14 @@ class CaretPanel(Gtk.Window):
             return False
         if time.monotonic() - self._shown_at < 0.6:
             return False
-        self.hide()
+        # Defer + re-check: don't hide just because a dropdown popover opened;
+        # only hide if focus truly left the panel (e.g. another app).
+        GLib.timeout_add(120, self._maybe_hide)
+        return False
+
+    def _maybe_hide(self):
+        if not self._popover_open and not self.has_toplevel_focus():
+            self.hide()
         return False
 
     def _on_key_press(self, _w, event):

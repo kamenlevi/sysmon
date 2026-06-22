@@ -34,6 +34,13 @@ class _Dropdown(Gtk.MenuButton):
         self._options = options
         self._on_select = on_select
         self._idx = 0
+        # Custom child so a ▾ arrow always shows (signals it's a dropdown).
+        child = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        self._lbl = Gtk.Label()
+        child.pack_start(self._lbl, False, False, 0)
+        child.pack_end(Gtk.Label(label="▾"), False, False, 0)
+        self.add(child)
+
         pop = Gtk.Popover()
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         box.set_margin_top(4)
@@ -46,16 +53,26 @@ class _Dropdown(Gtk.MenuButton):
             box.pack_start(b, False, False, 0)
         box.show_all()
         pop.add(box)
+        pop.connect("show", lambda *_: self._panel_popover(True))
+        pop.connect("closed", lambda *_: self._panel_popover(False))
         self.set_popover(pop)
+
         for i, (_l, v) in enumerate(options):
             if v == active_value:
                 self._idx = i
                 break
-        self.set_label(options[self._idx][0])
+        self._lbl.set_text(options[self._idx][0])
+
+    def _panel_popover(self, opened):
+        tl = self.get_toplevel()
+        if isinstance(tl, Gtk.Window):
+            tl._popover_open = opened
+            if not opened:
+                tl.grab_focus()
 
     def _choose(self, i):
         self._idx = i
-        self.set_label(self._options[i][0])
+        self._lbl.set_text(self._options[i][0])
         self.get_popover().popdown()
         self._on_select(self._options[i][1])
 

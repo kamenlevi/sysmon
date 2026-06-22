@@ -360,9 +360,9 @@ class PopupWindow(CaretPanel):
         self.stack.set_visible_child_name(name)
         self.title_lbl.set_markup(f"<b>{self._TITLES.get(name, name)}</b>")
         self.back_btn.set_visible(name != "overview")
-        # Only the overview behaves like a dropdown (click-away closes). On
-        # interactive sub-pages, keep it open so controls don't dismiss it.
-        self.autohide = (name == "overview")
+        # Every page auto-hides when you click another app; the dropdown's
+        # popover is guarded so opening it doesn't dismiss the panel.
+        self.autohide = True
         self._refresh_page(name)
 
     def open_to(self, name):
