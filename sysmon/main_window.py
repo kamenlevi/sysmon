@@ -683,9 +683,9 @@ class MainWindow(Gtk.ApplicationWindow):
             GLib.idle_add(self._update_ui, s)
         now = time.time()
         if now - self._last_history_record >= 5.0:
-            self.history.record(s)
             self._last_history_record = now
-            # push to history graph
+            # History is persisted once, by the always-running tray indicator;
+            # the window only needs to feed its live graph (no duplicate write).
             g = self._graphs.get("history")
             if g:
                 g.push(s.timestamp, {

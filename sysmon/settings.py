@@ -9,9 +9,7 @@ from gi.repository import Gtk
 SETTINGS_PATH = os.path.expanduser("~/.config/sysmon/settings.json")
 
 DEFAULTS = {
-    "show_cpu": True,
     "show_gpu": True,
-    "show_ram": True,
     "show_temp": True,
     "show_label": True,
     "warn_cpu_temp": 90,
@@ -22,20 +20,12 @@ DEFAULTS = {
     "poll_interval": 1.5,
     "history_hours": 24,
     "graph_window_sec": 300,
-    "dark_popup": True,
-    # Which view a left-click opens: "menu" (native menu) or "panel".
-    "default_view": "menu",
     # Default time window (seconds) for the usage-history view.
     "history_default_window": 1800,
     # Mountpoint shown on the main Disk gauge.
     "main_disk": "/",
     # Expand-animation duration in ms (0 = instant).
     "anim_ms": 170,
-    # Quick-stats popup geometry (persisted across sessions)
-    "popup_x": -1,
-    "popup_y": -1,
-    "popup_w": 340,
-    "popup_h": 420,
 }
 
 
@@ -130,6 +120,7 @@ def open_settings_dialog(settings: Settings, parent=None):
     section("Display")
     t_gpu = toggle("Show GPU section", "show_gpu")
     t_temp = toggle("Show temperatures", "show_temp")
+    t_label = toggle("Show stats label in tray", "show_label")
 
     section("Behaviour")
     t_notify = toggle("Desktop notifications for warnings", "notify_desktop")
@@ -154,6 +145,7 @@ def open_settings_dialog(settings: Settings, parent=None):
         settings.warn_cpu_pct = sp_cpu_pct.get_value_as_int()
         settings.show_gpu = t_gpu.get_active()
         settings.show_temp = t_temp.get_active()
+        settings.show_label = t_label.get_active()
         settings.notify_desktop = t_notify.get_active()
         settings.poll_interval = sp_poll.get_value()
         settings.history_hours = sp_hist.get_value_as_int()

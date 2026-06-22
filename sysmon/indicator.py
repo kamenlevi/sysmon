@@ -45,9 +45,7 @@ class SysMonIndicator:
         self.settings = settings
         self._main_window = None
         self._last_stats = SystemStats()
-        self._net_prev = _net_totals()
-        self._net_t = time.monotonic()
-        self._net_rate = (0.0, 0.0)
+        self._last_hist_record = 0.0
         # Rolling per-core (+ gpu) history so the Cores panel has the past,
         # not just realtime. ~2000 samples ≈ 50 min at the default poll.
         self._core_hist = []
@@ -286,20 +284,16 @@ class SysMonIndicator:
                 for label, rpm, _ in s.fans
             ]
 
-        # Network rate (real interfaces only — loopback excluded)
-        now = time.monotonic()
-        dt = max(0.001, now - self._net_t)
-        recv, sent = _net_totals()
-        self._net_rate = ((recv - self._net_prev[0]) / dt,
-                          (sent - self._net_prev[1]) / dt)
-        self._net_prev = (recv, sent)
-        self._net_t = now
-
-        # Persist to history so the history view has data.
-        try:
-            self.history.record(s)
-        except Exception:
-            pass
+        # Persist to history (single writer for the whole app). Throttle to
+        # ~5s so the DB matches the History view's "sampled every ~5 s" note
+        # regardless of the poll interval.
+        now = time.time()
+        if now - self._last_hist_record >= 5.0:
+            self._last_hist_record = now
+            try:
+                self.history.record(s)
+            except Exception:
+                pass
 
         # Per-core history buffer (always recorded so it's there on open).
         self._core_hist.append((
@@ -352,6 +346,9 @@ class SysMonIndicator:
     def _update_label(self) -> bool:
         if not _HAS_INDICATOR:
             return True
+        if not self.settings.show_label:
+            self._indicator.set_label("", "")
+            return True
         s = self._last_stats
         parts = [f"CPU {_pct3(s.cpu_percent)}%"]
         if self.settings.show_gpu and s.gpu_available:
@@ -389,21 +386,6 @@ def _short_mount(mp, n=18):
     return mp[: keep // 2] + "…" + mp[-(keep - keep // 2):]
 
 
-def _net_totals():
-    """Total (recv, sent) bytes across real interfaces, excluding loopback."""
-    try:
-        per = psutil.net_io_counters(pernic=True)
-        recv = sum(c.bytes_recv for n, c in per.items() if not n.startswith("lo"))
-        sent = sum(c.bytes_sent for n, c in per.items() if not n.startswith("lo"))
-        return recv, sent
-    except Exception:
-        try:
-            c = psutil.net_io_counters()
-            return c.bytes_recv, c.bytes_sent
-        except Exception:
-            return 0, 0
-
-
 def _mono(item, text):
     """Render a menu item's label in monospace so its width never changes."""
     lbl = item.get_child()
@@ -417,17 +399,6 @@ def _mono(item, text):
 def _pct3(v) -> str:
     """A percentage padded to 3 digit-widths so it never shifts."""
     return f"{int(round(max(0.0, min(v, 100.0))))}".rjust(3, _FIG)
-
-
-def _rate(bps: float) -> str:
-    # Fixed digit-width so the menu never changes width.
-    val, unit = bps, "B/s "
-    for u in ("KB/s", "MB/s", "GB/s"):
-        if val < 1024:
-            break
-        val /= 1024
-        unit = u
-    return f"{int(round(val))}".rjust(4, _FIG) + f" {unit}"
 
 
 class _DummyApp(Gtk.Application):

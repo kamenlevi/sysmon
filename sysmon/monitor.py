@@ -327,4 +327,12 @@ class SystemMonitor:
                     cb(s)
                 except Exception:
                     pass
-            self._stop_event.wait(self.interval)
+            # Re-read the poll interval from Settings each cycle so changes in
+            # the dialog take effect on the next tick (no restart needed).
+            interval = self.interval
+            if self._settings is not None:
+                try:
+                    interval = max(0.2, float(self._settings.poll_interval))
+                except Exception:
+                    pass
+            self._stop_event.wait(interval)
