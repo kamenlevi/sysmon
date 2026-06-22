@@ -127,6 +127,10 @@ def open_settings_dialog(settings: Settings, parent=None):
         return sc
 
     # Most-used settings first.
+    section("Display")
+    t_gpu = toggle("Show GPU section", "show_gpu")
+    t_temp = toggle("Show temperatures", "show_temp")
+
     section("Behaviour")
     t_notify = toggle("Desktop notifications for warnings", "notify_desktop")
     sp_poll = spin("Poll interval (seconds)", "poll_interval", 0.5, 10.0, 0.5, 1)
@@ -148,6 +152,8 @@ def open_settings_dialog(settings: Settings, parent=None):
         settings.warn_gpu_temp = sp_gpu_temp.get_value_as_int()
         settings.warn_ram_pct = sp_ram.get_value_as_int()
         settings.warn_cpu_pct = sp_cpu_pct.get_value_as_int()
+        settings.show_gpu = t_gpu.get_active()
+        settings.show_temp = t_temp.get_active()
         settings.notify_desktop = t_notify.get_active()
         settings.poll_interval = sp_poll.get_value()
         settings.history_hours = sp_hist.get_value_as_int()

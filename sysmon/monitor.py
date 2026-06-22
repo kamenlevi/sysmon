@@ -144,8 +144,11 @@ def _read_throttle_total() -> Optional[int]:
 
 
 class SystemMonitor:
-    def __init__(self, interval: float = 1.5):
+    def __init__(self, interval: float = 1.5, settings=None):
         self.interval = interval
+        # Optional Settings object — warning thresholds are read from it live,
+        # so changing them in the dialog takes effect on the next poll.
+        self._settings = settings
         self._stats = SystemStats()
         self._lock = threading.Lock()
         self._thread: Optional[threading.Thread] = None
@@ -281,17 +284,23 @@ class SystemMonitor:
             and (s.timestamp - self._last_throttle_time) < 10.0
         )
 
-        # Warnings
+        # Warnings — thresholds come from Settings (read live) so the values
+        # configured in the dialog actually take effect.
+        cfg = self._settings
+
+        def _thr(attr, default):
+            return getattr(cfg, attr, default) if cfg is not None else default
+
         if s.thermal_throttling:
             s.warnings.append("CPU thermal throttling")
-        if s.cpu_temp > 90:
+        if s.cpu_temp > _thr("warn_cpu_temp", 90):
             s.warnings.append(f"CPU temp critical: {s.cpu_temp:.0f}°C")
-        if s.cpu_percent >= 99:
+        if s.cpu_percent >= _thr("warn_cpu_pct", 99):
             s.warnings.append("CPU at 100% load")
-        if s.ram_percent > 90:
+        if s.ram_percent > _thr("warn_ram_pct", 90):
             s.warnings.append(f"RAM usage critical: {s.ram_percent:.0f}%")
         if s.gpu_available:
-            if s.gpu_temp > 85:
+            if s.gpu_temp > _thr("warn_gpu_temp", 85):
                 s.warnings.append(f"GPU temp critical: {s.gpu_temp:.0f}°C")
             if s.gpu_mem_percent > 90:
                 s.warnings.append(f"GPU VRAM critical: {s.gpu_mem_percent:.0f}%")

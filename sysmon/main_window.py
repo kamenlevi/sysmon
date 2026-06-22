@@ -763,13 +763,17 @@ class MainWindow(Gtk.ApplicationWindow):
         if "ram" in self._graphs:
             self._graphs["ram"].push(t, {"ram": s.ram_percent, "swap": s.swap_percent})
 
-        # Fans: update live RPM labels + graph
-        if s.fans and hasattr(self, "_fan_rpm_widgets"):
+        # Fans: update live RPM labels + graph. Read each channel's RPM by its
+        # own sysfs path (keyed) rather than positionally zipping psutil's fan
+        # list with our channels — those two orderings need not match, which
+        # could pin the wrong RPM to a fan on multi-fan boards.
+        if hasattr(self, "_fan_rpm_widgets") and getattr(self, "_fan_channels", None):
+            from .fans import refresh_rpms
+            refresh_rpms(self._fan_channels)
             fan_vals = {}
             max_rpm = 5000
-            for (label, rpm, _), (key, _fan_ch) in zip(
-                s.fans, list(getattr(self, "_fan_channels", {}).items())
-            ):
+            for key, fan in self._fan_channels.items():
+                rpm = fan.rpm
                 widgets = self._fan_rpm_widgets.get(key)
                 if widgets:
                     rpm_lbl, pb, pct_lbl = widgets

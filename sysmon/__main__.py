@@ -19,7 +19,7 @@ def main():
 
     settings = Settings()
     history = HistoryDB(max_age_hours=settings.history_hours)
-    monitor = SystemMonitor(interval=settings.poll_interval)
+    monitor = SystemMonitor(interval=settings.poll_interval, settings=settings)
 
     indicator = SysMonIndicator(monitor, history, settings)
 
