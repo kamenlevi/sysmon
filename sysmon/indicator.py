@@ -152,11 +152,16 @@ class SysMonIndicator:
 
     @staticmethod
     def _fill_items(items, lines):
+        # Only push items that actually changed — far less DBus churn, so the
+        # native menu stays snappy while open.
         for i, it in enumerate(items):
             if i < len(lines):
-                it.set_label(lines[i])
-                it.set_visible(True)
-            else:
+                if getattr(it, "_ll", None) != lines[i]:
+                    it.set_label(lines[i])
+                    it._ll = lines[i]
+                if not it.get_visible():
+                    it.set_visible(True)
+            elif it.get_visible():
                 it.set_visible(False)
 
     def _disk_lines(self):
@@ -182,10 +187,15 @@ class SysMonIndicator:
         return lines
 
     def _set_gauge(self, item, key, pct, label):
-        _mono(item, label)
+        if getattr(item, "_ll", None) != label:
+            _mono(item, label)
+            item._ll = label
         img = item.get_image()
         if img is not None:
-            img.set_from_file(gen_donut_icon(pct, key, size=_GAUGE_PX))
+            rp = int(round(pct))
+            if getattr(item, "_gpct", None) != rp:
+                img.set_from_file(gen_donut_icon(pct, key, size=_GAUGE_PX))
+                item._gpct = rp
 
     def _main_disk(self):
         return getattr(self.settings, "main_disk", "/") or "/"

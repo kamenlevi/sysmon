@@ -47,13 +47,21 @@ def generate_tray_icon(*_args, size: int = 22, **_kwargs) -> str:
     return path
 
 
+_DONUT_CACHE = {}  # (key, size) -> last rounded pct written
+
+
 def gen_donut_icon(pct: float, key: str, size: int = 20) -> str:
     """Draw a small circular gauge for a menu-item icon. Returns a PNG path.
 
-    Monochrome (dark arc on a light track) so it reads on the light Ubuntu
-    menu. `key` (cpu/gpu/ram) gives each gauge its own cached file.
+    Skips redrawing when the rounded percentage hasn't changed, so the menu
+    does no per-tick disk work while usage is steady.
     """
     pct = max(0.0, min(pct, 100.0))
+    path = os.path.join(_ICON_DIR, f"donut_{key}.png")
+    rp = int(round(pct))
+    if _DONUT_CACHE.get((key, size)) == rp and os.path.exists(path):
+        return path
+
     surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, size, size)
     ctx = cairo.Context(surface)
     ctx.set_source_rgba(0, 0, 0, 0)
@@ -77,8 +85,8 @@ def gen_donut_icon(pct: float, key: str, size: int = 20) -> str:
     ctx.arc(cx, cy, r, start, end)
     ctx.stroke()
 
-    path = os.path.join(_ICON_DIR, f"donut_{key}.png")
     surface.write_to_png(path)
+    _DONUT_CACHE[(key, size)] = rp
     return path
 
 
