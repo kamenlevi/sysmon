@@ -85,6 +85,24 @@ def _lbl(text="", css="metric-sub", xalign=0.0, ellipsize=False) -> Gtk.Label:
     return l
 
 
+def _click_wrap(widget, cb):
+    """Wrap a row so clicking it drills into a detail view (with hand cursor)."""
+    ev = Gtk.EventBox()
+    ev.add(widget)
+
+    def _press(_w, _e):
+        cb()
+        return True
+    ev.connect("button-press-event", _press)
+    ev.connect("enter-notify-event", lambda w, e: (
+        w.get_window().set_cursor(
+            Gdk.Cursor.new_from_name(w.get_display(), "pointer"))
+        if w.get_window() else None))
+    ev.connect("leave-notify-event", lambda w, e: (
+        w.get_window().set_cursor(None) if w.get_window() else None))
+    return ev
+
+
 def _fmt_bytes(n: float) -> str:
     for unit in ("B", "KB", "MB", "GB", "TB"):
         if n < 1024:
@@ -193,7 +211,7 @@ class _InfoRow(Gtk.Box):
 class PopupWindow(Gtk.Window):
 
     def __init__(self, on_open_app, settings, on_settings=None, on_quit=None,
-                 on_cores=None, on_set_default=None):
+                 on_cores=None, on_set_default=None, on_nav=None):
         super().__init__(type=Gtk.WindowType.TOPLEVEL)
         self.on_open_app = on_open_app
         self.settings = settings
@@ -201,6 +219,7 @@ class PopupWindow(Gtk.Window):
         self._on_quit = on_quit
         self._on_cores = on_cores
         self._on_set_default = on_set_default
+        self.on_nav = on_nav
         self._fan_controller = None
         self._shown_at = 0.0
         self._caret_x = WIDTH / 2.0
@@ -265,7 +284,8 @@ class PopupWindow(Gtk.Window):
         root.pack_start(self._ram, False, False, 0)
 
         self._disk = _MetricRow("Disk")
-        root.pack_start(self._disk, False, False, 0)
+        root.pack_start(_click_wrap(self._disk, lambda: self._nav("disks")),
+                        False, False, 0)
 
         # ── Info rows (network, sensors, uptime) ───────────────────────
         root.pack_start(Gtk.Separator(), False, False, 4)
@@ -276,10 +296,15 @@ class PopupWindow(Gtk.Window):
         self._sensors.show_all()
         self._sensors.set_no_show_all(True)
         self._sensors.hide()
-        self._load = _InfoRow("Load avg")
+        self._load = _InfoRow("Load (1·5·15m)")
+        self._load.set_tooltip_text(
+            "Load average: avg processes using/waiting for CPU over the last "
+            "1, 5 and 15 minutes. ≈ your core count means fully busy.")
         root.pack_start(self._load, False, False, 1)
         self._uptime = _InfoRow("Uptime")
-        root.pack_start(self._uptime, False, False, 1)
+        self._uptime.set_tooltip_text("Click for the full process list")
+        root.pack_start(_click_wrap(self._uptime, lambda: self._nav("processes")),
+                        False, False, 1)
 
         # ── Top processes ──────────────────────────────────────────────
         root.pack_start(Gtk.Separator(), False, False, 6)
@@ -318,15 +343,6 @@ class PopupWindow(Gtk.Window):
         settings_btn.get_style_context().add_class("foot-btn")
         settings_btn.connect("clicked", self._on_settings_clicked)
         foot.pack_start(settings_btn, False, False, 0)
-
-        self._default_toggle = Gtk.ToggleButton(label="Default view")
-        self._default_toggle.get_style_context().add_class("foot-btn")
-        self._default_toggle.set_tooltip_text(
-            "Open this panel directly when you click the tray icon")
-        self._default_toggle.set_active(
-            getattr(settings, "default_view", "menu") == "panel")
-        self._default_toggle.connect("toggled", self._on_default_toggled)
-        foot.pack_start(self._default_toggle, False, False, 0)
 
         quit_btn = Gtk.Button(label="Quit")
         quit_btn.get_style_context().add_class("foot-btn")
@@ -394,9 +410,10 @@ class PopupWindow(Gtk.Window):
         if self._on_cores:
             self._on_cores()
 
-    def _on_default_toggled(self, btn):
-        if self._on_set_default:
-            self._on_set_default(btn.get_active())
+    def _nav(self, view):
+        self.hide()
+        if self.on_nav:
+            self.on_nav(view)
 
     # ── Extra (on-demand) stats ─────────────────────────────────────────
 
