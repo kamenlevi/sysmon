@@ -10,7 +10,7 @@ import tempfile
 
 import cairo
 
-_ICON_DIR = os.path.join(tempfile.gettempdir(), "sysmon_icons")
+_ICON_DIR = os.path.join(tempfile.gettempdir(), "baro_icons")
 os.makedirs(_ICON_DIR, exist_ok=True)
 _PATH = [None]
 
@@ -41,7 +41,7 @@ def generate_tray_icon(*_args, size: int = 22, **_kwargs) -> str:
         _rounded_rect(ctx, x, base_y - bar_h, bar_w, bar_h, 1.2)
         ctx.fill()
 
-    path = os.path.join(_ICON_DIR, "sysmon_static.png")
+    path = os.path.join(_ICON_DIR, "baro_static.png")
     surface.write_to_png(path)
     _PATH[0] = path
     return path

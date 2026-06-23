@@ -19,7 +19,7 @@ CARET_H = 9
 CARET_W = 18
 
 _CSS = b"""
-window.sysmon-panel { background-color: transparent; }
+window.baro-panel { background-color: transparent; }
 .panel-title { color: #1a1a1a; font-size: 12px; font-weight: bold; }
 .close-btn, .back-btn {
     background: transparent; border: none; color: #888888;
@@ -65,7 +65,7 @@ class CaretPanel(Gtk.Window):
         self.set_app_paintable(True)
         self.connect("draw", self._draw_bg)
 
-        self.get_style_context().add_class("sysmon-panel")
+        self.get_style_context().add_class("baro-panel")
         self.set_decorated(False)
         self.set_resizable(False)
         self.set_skip_taskbar_hint(True)

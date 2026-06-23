@@ -1,4 +1,4 @@
-# SysMon
+# Baro
 
 A clean, real-time system monitor that lives in your Linux (GNOME) top bar —
 inspired by the look of the macOS *Stats* app. One click shows your CPU, GPU,
@@ -6,7 +6,7 @@ RAM and disk at a glance; from there you can drill into per-core graphs, usage
 history, a full process list, and more.
 
 <p align="center">
-  <img src="docs/demo.gif" alt="SysMon in use" width="320">
+  <img src="docs/demo.gif" alt="Baro in use" width="320">
 </p>
 
 ---
@@ -64,10 +64,10 @@ history, a full process list, and more.
 > (the installer sets this up). Tested on Ubuntu.
 
 ```bash
-git clone https://github.com/kamenlevi/sysmon.git
-cd sysmon
-./install.sh          # installs deps, a `sysmon` launcher, and autostart
-sysmon                # start it (open a new terminal first if needed)
+git clone https://github.com/kamenlevi/baro.git
+cd baro
+./install.sh          # installs deps, a `baro` launcher, and autostart
+baro                # start it (open a new terminal first if needed)
 ```
 
 If the tray icon doesn't appear, enable the AppIndicator extension and log out

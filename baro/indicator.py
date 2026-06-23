@@ -38,7 +38,7 @@ _NOTIFY_COOLDOWN = 30.0
 _GAUGE_PX = 24
 
 
-class SysMonIndicator:
+class BaroIndicator:
     def __init__(self, monitor, history, settings):
         self.monitor = monitor
         self.history = history
@@ -78,7 +78,7 @@ class SysMonIndicator:
 
         if _HAS_INDICATOR:
             self._indicator = AppIndicator.Indicator.new(
-                "sysmon", "utilities-system-monitor",
+                "baro", "utilities-system-monitor",
                 AppIndicator.IndicatorCategory.HARDWARE,
             )
             self._indicator.set_status(AppIndicator.IndicatorStatus.ACTIVE)
@@ -324,7 +324,7 @@ class SysMonIndicator:
             return
         _last_warn_notify_time[0] = now
         body = "\n".join(f"• {w}" for w in s.warnings)
-        n = Notify.Notification.new("⚠ SysMon Warning", body, "dialog-warning")
+        n = Notify.Notification.new("⚠ Baro Warning", body, "dialog-warning")
         n.set_urgency(Notify.Urgency.CRITICAL)
         try:
             n.show()
@@ -433,5 +433,5 @@ def _rate(bps: float) -> str:
 class _DummyApp(Gtk.Application):
     """Minimal Gtk.Application shim so MainWindow can call super().__init__(application=app)."""
     def __init__(self):
-        super().__init__(application_id="com.sysmon.app")
+        super().__init__(application_id="com.baro.app")
         self.register()

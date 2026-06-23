@@ -243,7 +243,7 @@ class PopupWindow(CaretPanel):
 
     def __init__(self, settings, history_db, on_open_app=None,
                  on_settings=None, on_quit=None):
-        super().__init__("System Monitor", show_back=False)
+        super().__init__("Baro", show_back=False)
         _apply_css()
         self.on_open_app = on_open_app
         self.settings = settings
@@ -378,7 +378,7 @@ class PopupWindow(CaretPanel):
         self.hide()
 
     # ── Stack navigation ────────────────────────────────────────────────
-    _TITLES = {"overview": "System Monitor", "cores": "CPU / GPU cores",
+    _TITLES = {"overview": "Baro", "cores": "CPU / GPU cores",
                "history": "Usage history", "processes": "Processes",
                "disks": "Disks"}
 

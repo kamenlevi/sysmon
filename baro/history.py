@@ -4,7 +4,7 @@ import sqlite3
 import time
 from typing import List, Tuple
 
-DB_PATH = os.path.expanduser("~/.local/share/sysmon/history.db")
+DB_PATH = os.path.expanduser("~/.local/share/baro/history.db")
 
 
 class HistoryDB:

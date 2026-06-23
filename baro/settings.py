@@ -6,7 +6,7 @@ import gi
 gi.require_version("Gtk", "3.0")
 from gi.repository import Gtk
 
-SETTINGS_PATH = os.path.expanduser("~/.config/sysmon/settings.json")
+SETTINGS_PATH = os.path.expanduser("~/.config/baro/settings.json")
 
 DEFAULTS = {
     "show_cpu": True,
@@ -71,7 +71,7 @@ class Settings:
 
 def open_settings_dialog(settings: Settings, parent=None):
     dlg = Gtk.Dialog(
-        title="SysMon Settings",
+        title="Baro Settings",
         transient_for=parent,
         flags=0,
     )

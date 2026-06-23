@@ -132,7 +132,7 @@ def _framed(title: str, child: Gtk.Widget) -> Gtk.Frame:
 class MainWindow(Gtk.ApplicationWindow):
     def __init__(self, app, monitor, history, settings,
                  fan_channels=None, fan_controller=None):
-        super().__init__(application=app, title="SysMon – System Monitor")
+        super().__init__(application=app, title="Baro – System Monitor")
         self.monitor = monitor
         self.history = history
         self.settings = settings
@@ -541,8 +541,8 @@ class MainWindow(Gtk.ApplicationWindow):
             curve_frame_inner.pack_start(ctrl_row, False, False, 0)
 
             note_lbl = Gtk.Label(
-                label="Note: curve is applied while SysMon is running. "
-                      "Closing SysMon returns fans to BIOS auto control.",
+                label="Note: curve is applied while Baro is running. "
+                      "Closing Baro returns fans to BIOS auto control.",
                 xalign=0.0
             )
             note_lbl.get_style_context().add_class("unit")

@@ -10,18 +10,18 @@ from gi.repository import Gtk, GLib, Notify
 
 
 def main():
-    Notify.init("SysMon")
+    Notify.init("Baro")
 
-    from sysmon.settings import Settings
-    from sysmon.history import HistoryDB
-    from sysmon.monitor import SystemMonitor
-    from sysmon.indicator import SysMonIndicator
+    from baro.settings import Settings
+    from baro.history import HistoryDB
+    from baro.monitor import SystemMonitor
+    from baro.indicator import BaroIndicator
 
     settings = Settings()
     history = HistoryDB(max_age_hours=settings.history_hours)
     monitor = SystemMonitor(interval=settings.poll_interval)
 
-    indicator = SysMonIndicator(monitor, history, settings)
+    indicator = BaroIndicator(monitor, history, settings)
 
     monitor.start()
 
@@ -36,6 +36,6 @@ def main():
 
 
 if __name__ == "__main__":
-    # Allow running as: python -m sysmon
+    # Allow running as: python -m baro
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     main()
