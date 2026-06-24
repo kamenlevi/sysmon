@@ -60,8 +60,22 @@ history, a full process list, and more.
 
 ## Install
 
-> Requires a Linux desktop with **GNOME** and the **AppIndicator** extension
-> (the installer sets this up). Tested on Ubuntu.
+> Requires a Linux desktop with **GNOME** and the **AppIndicator** extension.
+> Tested on Ubuntu.
+
+### Debian / Ubuntu package (recommended)
+
+Download `baro_<version>_all.deb` from the
+[latest release](https://github.com/kamenlevi/baro/releases/latest), then:
+
+```bash
+sudo apt install ./baro_1.0.0_all.deb   # apt pulls in all dependencies
+baro
+```
+
+To uninstall: `sudo apt remove baro`.
+
+### From source (installer script)
 
 ```bash
 git clone https://github.com/kamenlevi/baro.git
